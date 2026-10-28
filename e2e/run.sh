@@ -141,6 +141,12 @@ for xr in "$SMALL" "$MEDIUM"; do
     echo
   } | tee -a "$RESULTS_DIR/timeline.md"
 done
+kubectl get appenvironments -n "$TEAM_NS" -o json |
+  jq '[.items[] | {name: .metadata.name, created: .metadata.creationTimestamp, conditions: .status.conditions}]' |
+  tee "$RESULTS_DIR/xr-conditions.json"
+kubectl get events -n "$TEAM_NS" --field-selector involvedObject.kind=AppEnvironment \
+  -o custom-columns=TIME:.lastTimestamp,OBJECT:.involvedObject.name,REASON:.reason,COUNT:.count,MESSAGE:.message |
+  tee "$RESULTS_DIR/xr-events.txt"
 
 # ---------------------------------------------------------------------------
 log "4. Environment contents follow the claim"
