@@ -1,0 +1,9 @@
+# Rejected by the ValidatingAdmissionPolicy: no platform.example.io/team label.
+apiVersion: platform.example.io/v1alpha1
+kind: AppEnvironment
+metadata:
+  name: no-owner
+  namespace: team-payments
+spec:
+  size: small
+  image: "env-probe:e2e"

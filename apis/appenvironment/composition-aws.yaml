@@ -1,0 +1,215 @@
+# RENDER-ONLY. This Composition is never applied to a cluster and nothing in
+# this repository creates AWS resources. CI renders it with
+# `crossplane composition render` and validates the output against the
+# provider-upjet-aws CRD schemas with `crossplane resource validate`.
+#
+# It shows that the AppEnvironment API is backend-agnostic: the same claim,
+# selected with the label platform.example.io/provider=aws, would be backed by
+# Amazon RDS for PostgreSQL and an encrypted, private S3 bucket. The
+# in-cluster pieces (namespace, quota, network policy, Deployment) are the same
+# provider-kubernetes Objects as composition-kind.yaml, pointed at an EKS
+# ProviderConfig, and are left out here to keep the cloud mapping readable.
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: appenvironment-aws
+  labels:
+    platform.example.io/provider: aws
+spec:
+  compositeTypeRef:
+    apiVersion: platform.example.io/v1alpha1
+    kind: AppEnvironment
+  mode: Pipeline
+  pipeline:
+    - step: compose
+      functionRef:
+        name: function-patch-and-transform
+      input:
+        apiVersion: pt.fn.crossplane.io/v1beta1
+        kind: Resources
+        resources:
+          - name: assets-bucket
+            base:
+              apiVersion: s3.aws.m.upbound.io/v1beta1
+              kind: Bucket
+              spec:
+                providerConfigRef:
+                  kind: ClusterProviderConfig
+                  name: aws
+                forProvider:
+                  region: eu-central-1
+                  forceDestroy: false
+                  tags:
+                    managed-by: crossplane
+            patches:
+              - type: CombineFromComposite
+                combine:
+                  variables:
+                    - fromFieldPath: metadata.labels[platform.example.io/team]
+                    - fromFieldPath: metadata.name
+                  strategy: string
+                  string:
+                    fmt: "%s-%s-assets"
+                toFieldPath: metadata.name
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.labels[platform.example.io/team]
+                toFieldPath: spec.forProvider.tags[team]
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: spec.forProvider.tags[environment]
+
+          - name: assets-bucket-public-access-block
+            base:
+              apiVersion: s3.aws.m.upbound.io/v1beta1
+              kind: BucketPublicAccessBlock
+              spec:
+                providerConfigRef:
+                  kind: ClusterProviderConfig
+                  name: aws
+                forProvider:
+                  region: eu-central-1
+                  bucketSelector:
+                    matchControllerRef: true
+                  blockPublicAcls: true
+                  blockPublicPolicy: true
+                  ignorePublicAcls: true
+                  restrictPublicBuckets: true
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: metadata.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-assets-public-access-block"
+
+          - name: assets-bucket-encryption
+            base:
+              apiVersion: s3.aws.m.upbound.io/v1beta1
+              kind: BucketServerSideEncryptionConfiguration
+              spec:
+                providerConfigRef:
+                  kind: ClusterProviderConfig
+                  name: aws
+                forProvider:
+                  region: eu-central-1
+                  bucketSelector:
+                    matchControllerRef: true
+                  rule:
+                    - applyServerSideEncryptionByDefault:
+                        sseAlgorithm: aws:kms
+                      bucketKeyEnabled: true
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: metadata.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-assets-encryption"
+
+          - name: db-instance
+            base:
+              apiVersion: rds.aws.m.upbound.io/v1beta1
+              kind: Instance
+              spec:
+                providerConfigRef:
+                  kind: ClusterProviderConfig
+                  name: aws
+                forProvider:
+                  region: eu-central-1
+                  engine: postgres
+                  engineVersion: "17"
+                  instanceClass: db.t4g.micro
+                  allocatedStorage: 20
+                  storageType: gp3
+                  storageEncrypted: true
+                  publiclyAccessible: false
+                  multiAz: false
+                  dbName: app
+                  username: app
+                  autoGeneratePassword: true
+                  passwordSecretRef:
+                    name: PASSWORD_SECRET
+                    key: password
+                  dbSubnetGroupName: platform-private
+                  backupRetentionPeriod: 7
+                  skipFinalSnapshot: false
+                  finalSnapshotIdentifier: FINAL_SNAPSHOT
+                  applyImmediately: true
+                writeConnectionSecretToRef:
+                  name: CONNECTION_SECRET
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: metadata.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-db"
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: spec.forProvider.passwordSecretRef.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-db-password"
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: spec.forProvider.finalSnapshotIdentifier
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-final"
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: spec.writeConnectionSecretToRef.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-db-connection"
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.size
+                toFieldPath: spec.forProvider.instanceClass
+                transforms:
+                  - type: map
+                    map:
+                      small: db.t4g.micro
+                      medium: db.t4g.medium
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.size
+                toFieldPath: spec.forProvider.allocatedStorage
+                transforms:
+                  - type: map
+                    map:
+                      small: 20
+                      medium: 50
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.size
+                toFieldPath: spec.forProvider.multiAz
+                transforms:
+                  - type: map
+                    map:
+                      small: false
+                      medium: true
+              - type: ToCompositeFieldPath
+                fromFieldPath: spec.writeConnectionSecretToRef.name
+                toFieldPath: status.databaseSecret
+
+    - step: filter-optional-resources
+      functionRef:
+        name: function-cel-filter
+      input:
+        apiVersion: cel.fn.crossplane.io/v1beta1
+        kind: Filters
+        filters:
+          - name: "db-.*"
+            expression: >-
+              has(observed.composite.resource.spec.database)
+              && observed.composite.resource.spec.database == true

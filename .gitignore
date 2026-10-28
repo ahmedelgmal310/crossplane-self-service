@@ -1,0 +1,15 @@
+# build and test output
+/bin/
+coverage.out
+*.test
+rendered/
+e2e-results/
+
+# editors / OS
+.idea/
+.vscode/
+.DS_Store
+
+# local tooling state
+.omc/
+.impeccable/

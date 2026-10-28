@@ -1,0 +1,12 @@
+# Rejected by the ValidatingAdmissionPolicy: the label claims team growth, but
+# team-payments belongs to payments (no billing to another team's budget).
+apiVersion: platform.example.io/v1alpha1
+kind: AppEnvironment
+metadata:
+  name: borrowed-budget
+  namespace: team-payments
+  labels:
+    platform.example.io/team: growth
+spec:
+  size: small
+  image: "env-probe:e2e"

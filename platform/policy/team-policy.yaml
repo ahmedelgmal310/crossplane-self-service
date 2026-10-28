@@ -1,0 +1,96 @@
+# Admission policy for AppEnvironment claims, enforced by the API server
+# itself (ValidatingAdmissionPolicy, CEL). No webhook to run or keep alive.
+#
+# Schema-level rules (enums, required fields, immutability of spec.database,
+# hostname required for public exposure) live in the XRD. The rules here need
+# context the schema cannot see: labels, the namespace, and platform data.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: platform-system
+---
+# Platform-owned data: which teams exist and the largest size each may request.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: team-limits
+  namespace: platform-system
+data:
+  payments: medium
+  growth: small
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: appenvironment-team-policy
+spec:
+  failurePolicy: Fail
+  paramKind:
+    apiVersion: v1
+    kind: ConfigMap
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [platform.example.io]
+        apiVersions: ["*"]
+        operations: [CREATE, UPDATE]
+        resources: [appenvironments]
+  matchConditions:
+    # Crossplane updates the XR (finalizers, composition refs). Its writes must
+    # never be blocked, or a claim that became invalid could not be deleted.
+    - name: not-crossplane
+      expression: "request.userInfo.username != 'system:serviceaccount:crossplane-system:crossplane'"
+    - name: not-being-deleted
+      expression: "!has(object.metadata.deletionTimestamp)"
+  variables:
+    - name: team
+      expression: >-
+        has(object.metadata.labels) && 'platform.example.io/team' in object.metadata.labels
+        ? object.metadata.labels['platform.example.io/team'] : ''
+    - name: maxSize
+      expression: >-
+        variables.team != '' && has(params.data) && variables.team in params.data
+        ? params.data[variables.team] : ''
+    - name: namespaceTeam
+      expression: >-
+        has(namespaceObject.metadata.labels) && 'platform.example.io/team' in namespaceObject.metadata.labels
+        ? namespaceObject.metadata.labels['platform.example.io/team'] : ''
+    - name: oldTeam
+      expression: >-
+        request.operation == 'UPDATE' && has(oldObject.metadata.labels)
+        && 'platform.example.io/team' in oldObject.metadata.labels
+        ? oldObject.metadata.labels['platform.example.io/team'] : ''
+    - name: rank
+      expression: "{'small': 1, 'medium': 2}"
+  validations:
+    - expression: "variables.team != ''"
+      reason: Invalid
+      message: "AppEnvironment must carry the label platform.example.io/team"
+    - expression: "variables.team == '' || variables.maxSize != ''"
+      reason: Invalid
+      messageExpression: "'team \"' + variables.team + '\" is not registered with the platform (ConfigMap platform-system/team-limits)'"
+    - expression: "variables.team == '' || variables.team == variables.namespaceTeam"
+      reason: Forbidden
+      messageExpression: "'label platform.example.io/team=' + variables.team + ' does not match the team that owns namespace ' + namespaceObject.metadata.name"
+    - expression: >-
+        variables.maxSize == '' || (variables.maxSize in variables.rank
+        && variables.rank[object.spec.size] <= variables.rank[variables.maxSize])
+      reason: Forbidden
+      messageExpression: "'team ' + variables.team + ' may request at most size ' + variables.maxSize + ', got ' + object.spec.size"
+    - expression: "size(variables.team) + size(object.metadata.name) <= 62"
+      reason: Invalid
+      message: "team label plus name must fit a namespace name (63 characters including the dash)"
+    - expression: "request.operation != 'UPDATE' || variables.oldTeam == variables.team"
+      reason: Forbidden
+      message: "the platform.example.io/team label is immutable"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: appenvironment-team-policy
+spec:
+  policyName: appenvironment-team-policy
+  validationActions: [Deny]
+  paramRef:
+    name: team-limits
+    namespace: platform-system
+    parameterNotFoundAction: Deny

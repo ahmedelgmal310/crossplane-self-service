@@ -1,0 +1,11 @@
+# Rejected by the ValidatingAdmissionPolicy: team growth is limited to small.
+apiVersion: platform.example.io/v1alpha1
+kind: AppEnvironment
+metadata:
+  name: campaign-api
+  namespace: team-growth
+  labels:
+    platform.example.io/team: growth
+spec:
+  size: medium
+  image: "env-probe:e2e"

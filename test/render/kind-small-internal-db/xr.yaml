@@ -1,0 +1,12 @@
+apiVersion: platform.example.io/v1alpha1
+kind: AppEnvironment
+metadata:
+  name: ledger
+  namespace: team-growth
+  labels:
+    platform.example.io/team: growth
+spec:
+  size: small
+  database: true
+  image: "ghcr.io/example/ledger:1.0.0"
+  port: 9090

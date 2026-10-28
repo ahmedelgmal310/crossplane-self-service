@@ -1,0 +1,227 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  GO_VERSION: "1.27.3"
+  GOLANGCI_LINT_VERSION: v2.14.0
+  GOVULNCHECK_VERSION: v1.9.0
+  HELM_VERSION: v4.3.0
+  CROSSPLANE_CLI_VERSION: v2.5.0
+  CROSSPLANE_CLI_SHA256: 065dd6b40c9ea5fc71e49900d5c924cc0bec7f58375922ddbde6b402f292347e
+  CROSSPLANE_IMAGE: xpkg.crossplane.io/crossplane/crossplane:v2.4.3@sha256:1c66261d805a73cade46e2ac94b665c73aebd4a00844de5fcae4bcadaa2be638
+  KUBECONFORM_VERSION: v0.8.0
+  KUBECONFORM_SHA256: 9bc2bffbf71f261128533edaf912153948b7ff238f9a531ae6d34466ec287883
+  YAMLLINT_VERSION: "1.38.0"
+  GITLEAKS_IMAGE: ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f
+  ACTIONLINT_IMAGE: rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
+  HADOLINT_IMAGE: mirror.gcr.io/hadolint/hadolint:v2.15.1@sha256:32dac94127fd60b7b7e3fbfc65e1383b9b5e25c9bfd7b8536de7a539fe68a12d
+  COVERAGE_MIN: "80"
+
+jobs:
+  go:
+    name: Go vet, test (race + coverage), govulncheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:18.6-alpine3.24@sha256:10a5c69a83035ab5239f5620d708520e8b28f5aa1f2b20143e6024532edadfb5
+        env:
+          POSTGRES_USER: probe
+          POSTGRES_PASSWORD: probe-ci-only
+          POSTGRES_DB: probe
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U probe"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 30
+    env:
+      TEST_DATABASE_URL: postgres://probe:probe-ci-only@127.0.0.1:5432/probe?sslmode=disable
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: go vet
+        run: go vet ./...
+      - name: go test (race, coverage, PostgreSQL integration)
+        run: go test -race -covermode=atomic -coverprofile=coverage.out ./...
+      - name: Coverage gate
+        run: |
+          total=$(go tool cover -func=coverage.out | awk '/^total:/ {sub("%", "", $3); print $3}')
+          echo "Total coverage: ${total}% (minimum ${COVERAGE_MIN}%)"
+          echo "Go test coverage: **${total}%** (gate ${COVERAGE_MIN}%)" >> "$GITHUB_STEP_SUMMARY"
+          awk -v t="$total" -v m="$COVERAGE_MIN" 'BEGIN { exit !(t + 0 >= m + 0) }'
+      - name: govulncheck
+        run: go run "golang.org/x/vuln/cmd/govulncheck@${GOVULNCHECK_VERSION}" ./...
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: coverage
+          path: coverage.out
+          retention-days: 7
+
+  golangci-lint:
+    name: golangci-lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          version: ${{ env.GOLANGCI_LINT_VERSION }}
+
+  static:
+    name: gitleaks, shellcheck, actionlint, hadolint, yamllint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: gitleaks (full history)
+        run: |
+          docker run --rm -v "$PWD:/repo:ro" \
+            -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0='*' \
+            "$GITLEAKS_IMAGE" git --no-banner --redact --verbose /repo
+      - name: shellcheck
+        run: shellcheck -x e2e/*.sh scripts/*.sh
+      - name: actionlint
+        run: docker run --rm -v "$PWD:/repo" -w /repo "$ACTIONLINT_IMAGE" -color
+      - name: hadolint
+        run: docker run --rm -v "$PWD:/work:ro" -w /work "$HADOLINT_IMAGE" hadolint Dockerfile
+      - name: yamllint
+        run: pipx run "yamllint==${YAMLLINT_VERSION}" --strict .
+
+  compositions:
+    name: Composition render tests, schema validation, kubeconform
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install crossplane CLI and kubeconform (checksums verified)
+        run: |
+          curl -fsSLo /tmp/crossplane \
+            "https://cli.crossplane.io/stable/${CROSSPLANE_CLI_VERSION}/bin/linux_amd64/crossplane"
+          echo "${CROSSPLANE_CLI_SHA256}  /tmp/crossplane" | sha256sum -c -
+          sudo install -m 0755 /tmp/crossplane /usr/local/bin/crossplane
+          curl -fsSLo /tmp/kubeconform.tgz \
+            "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz"
+          echo "${KUBECONFORM_SHA256}  /tmp/kubeconform.tgz" | sha256sum -c -
+          sudo tar -xzf /tmp/kubeconform.tgz -C /usr/local/bin kubeconform
+          crossplane version --client
+      - name: Render every case and compare with golden files
+        run: scripts/render-test.sh
+      - name: Validate rendered resources against provider and XRD schemas
+        if: ${{ !cancelled() }}
+        run: |
+          crossplane resource validate \
+            test/schemas/extensions.yaml,apis/appenvironment/definition.yaml rendered/ \
+            --crossplane-image "$CROSSPLANE_IMAGE" --error-on-missing-schemas --skip-success-results
+      - name: Validate claims, Compositions and packages offline
+        if: ${{ !cancelled() }}
+        run: |
+          crossplane resource validate apis/appenvironment/definition.yaml \
+            examples/checkout-api.yaml,examples/preview.yaml \
+            --crossplane-image "$CROSSPLANE_IMAGE" --error-on-missing-schemas
+          # Function inputs (P&T Resources, cel-filter Filters) are validated
+          # against the schemas shipped in the function packages. The CLI has
+          # no schema for the Composition wrapper itself, so this call does not
+          # use --error-on-missing-schemas.
+          crossplane resource validate test/schemas/extensions.yaml,platform/functions.yaml \
+            apis/appenvironment/composition-kind.yaml,apis/appenvironment/composition-aws.yaml,platform/provider-configs.yaml \
+            --crossplane-image "$CROSSPLANE_IMAGE"
+          # Schema-level rejections are caught before anything reaches a cluster.
+          for bad in examples/invalid/unknown-size.yaml examples/invalid/public-without-hostname.yaml; do
+            if crossplane resource validate apis/appenvironment/definition.yaml "$bad" \
+                --crossplane-image "$CROSSPLANE_IMAGE"; then
+              echo "::error::$bad passed schema validation but must fail"
+              exit 1
+            fi
+          done
+      - name: kubeconform (Kubernetes objects inside every rendered Object, plus platform manifests)
+        if: ${{ !cancelled() }}
+        run: |
+          mkdir -p rendered/manifests
+          for f in rendered/kind-*.yaml; do
+            yq e 'select(.kind == "Object") | .spec.forProvider.manifest' "$f" > "rendered/manifests/$(basename "$f")"
+          done
+          kubeconform -strict -summary -output pretty \
+            rendered/manifests/ platform/teams.yaml platform/policy/team-policy.yaml
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: rendered
+          path: rendered/
+          retention-days: 14
+
+  e2e:
+    name: E2E on kind (provision, connect, resize, drift, delete)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    needs: [go, compositions]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: Build platformctl
+        run: go build -o bin/platformctl ./cmd/platformctl
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Build env-probe image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          load: true
+          push: false
+          tags: env-probe:e2e
+          build-args: VERSION=ci-${{ github.sha }}
+          cache-from: type=gha,scope=env-probe
+          cache-to: type=gha,scope=env-probe,mode=max
+      - uses: helm/kind-action@1544676c07bb3570fcb70166beaa07c4528fd4aa # v1.15.1
+        with:
+          version: v0.33.0
+          node_image: kindest/node:v1.36.4@sha256:099e049362a1526b2db71494e1947aae99bd16290d7c895f2b7ea312e3cbfaed
+          kubectl_version: v1.36.4
+          cluster_name: platform
+          wait: 120s
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: ${{ env.HELM_VERSION }}
+      - name: Load env-probe into kind
+        run: kind load docker-image env-probe:e2e --name platform
+      - name: Install the platform
+        run: e2e/setup.sh
+      - name: Run the self-service scenario
+        run: e2e/run.sh
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: e2e-results
+          path: e2e-results/
+          retention-days: 90
+          if-no-files-found: ignore

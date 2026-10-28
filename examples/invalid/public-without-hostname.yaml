@@ -1,0 +1,12 @@
+# Rejected by an XRD CEL rule: public exposure needs a hostname.
+apiVersion: platform.example.io/v1alpha1
+kind: AppEnvironment
+metadata:
+  name: storefront
+  namespace: team-payments
+  labels:
+    platform.example.io/team: payments
+spec:
+  size: small
+  exposure: public
+  image: "env-probe:e2e"

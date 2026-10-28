@@ -1,0 +1,99 @@
+# AppEnvironment is the only API a product team needs to know. It is a
+# namespaced composite resource (Crossplane v2): teams create it in their own
+# team namespace and the platform composes everything else.
+apiVersion: apiextensions.crossplane.io/v2
+kind: CompositeResourceDefinition
+metadata:
+  name: appenvironments.platform.example.io
+spec:
+  group: platform.example.io
+  scope: Namespaced
+  names:
+    kind: AppEnvironment
+    plural: appenvironments
+    singular: appenvironment
+    shortNames: [appenv]
+    categories: [platform]
+  defaultCompositionRef:
+    name: appenvironment-kind
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      additionalPrinterColumns:
+        - name: SIZE
+          type: string
+          jsonPath: .spec.size
+        - name: DATABASE
+          type: boolean
+          jsonPath: .spec.database
+        - name: EXPOSURE
+          type: string
+          jsonPath: .spec.exposure
+        - name: NAMESPACE
+          type: string
+          jsonPath: .status.namespace
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              description: What the team asks for. Everything else is platform policy.
+              required: [size, image]
+              properties:
+                size:
+                  type: string
+                  description: >-
+                    T-shirt size. Maps to the namespace ResourceQuota, app replicas
+                    and database storage. The largest size a team may request is
+                    set by platform policy (team-limits ConfigMap).
+                  enum: [small, medium]
+                database:
+                  type: boolean
+                  description: >-
+                    Provision a PostgreSQL instance and deliver its credentials to
+                    the app as the Secret app-db. Immutable: turning it off would
+                    delete the database.
+                  default: false
+                exposure:
+                  type: string
+                  description: >-
+                    internal: reachable only from namespaces of the same team.
+                    public: also gets an Ingress and is reachable from the ingress
+                    controller namespace.
+                  enum: [internal, public]
+                  default: internal
+                hostname:
+                  type: string
+                  description: Ingress host. Required when exposure is public.
+                  maxLength: 253
+                  pattern: '^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)+$'
+                image:
+                  type: string
+                  description: Container image of the application.
+                  minLength: 1
+                  maxLength: 255
+                port:
+                  type: integer
+                  description: Container port the application listens on.
+                  minimum: 1024
+                  maximum: 65535
+                  default: 8080
+              x-kubernetes-validations:
+                - rule: "self.exposure != 'public' || has(self.hostname)"
+                  message: spec.hostname is required when spec.exposure is public
+                - rule: "!has(oldSelf.database) || self.database == oldSelf.database"
+                  message: spec.database is immutable; create a new AppEnvironment instead
+            status:
+              type: object
+              properties:
+                namespace:
+                  type: string
+                  description: Namespace the environment runs in.
+                endpoint:
+                  type: string
+                  description: In-cluster URL of the application Service.
+                databaseSecret:
+                  type: string
+                  description: Secret in the environment namespace holding DATABASE_URL and PG* keys.

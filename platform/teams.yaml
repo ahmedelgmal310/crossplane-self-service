@@ -1,0 +1,53 @@
+# Each team gets one namespace where it may create AppEnvironments and
+# nothing else. Developers never need rights on namespaces, quotas, network
+# policies or databases: the platform creates those on their behalf.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: appenvironment-editor
+rules:
+  - apiGroups: [platform.example.io]
+    resources: [appenvironments]
+    verbs: [get, list, watch, create, update, patch, delete]
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: team-payments
+  labels:
+    platform.example.io/team: payments
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: appenvironment-editors
+  namespace: team-payments
+subjects:
+  - apiGroup: rbac.authorization.k8s.io
+    kind: Group
+    name: team-payments-developers
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: appenvironment-editor
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: team-growth
+  labels:
+    platform.example.io/team: growth
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: appenvironment-editors
+  namespace: team-growth
+subjects:
+  - apiGroup: rbac.authorization.k8s.io
+    kind: Group
+    name: team-growth-developers
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: appenvironment-editor

@@ -1,0 +1,956 @@
+# Default Composition: builds an AppEnvironment on the same cluster with
+# provider-kubernetes (Objects) and provider-helm (CloudNativePG cluster chart).
+#
+# Pipeline:
+#   1. patch-and-transform  declares every resource and maps size -> limits
+#   2. cel-filter           drops db-* unless spec.database, public-* unless public
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: appenvironment-kind
+  labels:
+    platform.example.io/provider: kind
+spec:
+  compositeTypeRef:
+    apiVersion: platform.example.io/v1alpha1
+    kind: AppEnvironment
+  mode: Pipeline
+  pipeline:
+    - step: compose
+      functionRef:
+        name: function-patch-and-transform
+      input:
+        apiVersion: pt.fn.crossplane.io/v1beta1
+        kind: Resources
+        patchSets:
+          # Every composed object lives in the environment namespace
+          # "<team>-<name>" and carries the environment and team labels.
+          - name: in-env-namespace
+            patches:
+              - type: CombineFromComposite
+                combine:
+                  variables:
+                    - fromFieldPath: metadata.labels[platform.example.io/team]
+                    - fromFieldPath: metadata.name
+                  strategy: string
+                  string:
+                    fmt: "%s-%s"
+                toFieldPath: spec.forProvider.manifest.metadata.namespace
+          - name: env-labels
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: spec.forProvider.manifest.metadata.labels[platform.example.io/environment]
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.labels[platform.example.io/team]
+                toFieldPath: spec.forProvider.manifest.metadata.labels[platform.example.io/team]
+        resources:
+          # ---------------------------------------------------------------
+          # Namespace, quota and defaults
+          # ---------------------------------------------------------------
+          - name: namespace
+            base:
+              apiVersion: kubernetes.m.crossplane.io/v1alpha1
+              kind: Object
+              spec:
+                watch: true
+                providerConfigRef:
+                  kind: ClusterProviderConfig
+                  name: in-cluster
+                forProvider:
+                  manifest:
+                    apiVersion: v1
+                    kind: Namespace
+                    metadata:
+                      labels:
+                        app.kubernetes.io/managed-by: crossplane
+                        pod-security.kubernetes.io/enforce: baseline
+                        pod-security.kubernetes.io/warn: restricted
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: metadata.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-namespace"
+              - type: CombineFromComposite
+                combine:
+                  variables:
+                    - fromFieldPath: metadata.labels[platform.example.io/team]
+                    - fromFieldPath: metadata.name
+                  strategy: string
+                  string:
+                    fmt: "%s-%s"
+                toFieldPath: spec.forProvider.manifest.metadata.name
+              - type: PatchSet
+                patchSetName: env-labels
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.size
+                toFieldPath: spec.forProvider.manifest.metadata.labels[platform.example.io/size]
+              - type: ToCompositeFieldPath
+                fromFieldPath: spec.forProvider.manifest.metadata.name
+                toFieldPath: status.namespace
+
+          - name: quota
+            base:
+              apiVersion: kubernetes.m.crossplane.io/v1alpha1
+              kind: Object
+              spec:
+                watch: true
+                providerConfigRef:
+                  kind: ClusterProviderConfig
+                  name: in-cluster
+                forProvider:
+                  manifest:
+                    apiVersion: v1
+                    kind: ResourceQuota
+                    metadata:
+                      name: env-quota
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: metadata.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-quota"
+              - type: PatchSet
+                patchSetName: in-env-namespace
+              - type: PatchSet
+                patchSetName: env-labels
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.size
+                toFieldPath: spec.forProvider.manifest.spec.hard
+                transforms:
+                  - type: map
+                    map:
+                      small:
+                        requests.cpu: "1"
+                        requests.memory: 1Gi
+                        limits.cpu: "2"
+                        limits.memory: 2Gi
+                        pods: "10"
+                        services: "5"
+                        persistentvolumeclaims: "2"
+                        requests.storage: 2Gi
+                      medium:
+                        requests.cpu: "2"
+                        requests.memory: 4Gi
+                        limits.cpu: "4"
+                        limits.memory: 8Gi
+                        pods: "20"
+                        services: "10"
+                        persistentvolumeclaims: "4"
+                        requests.storage: 10Gi
+
+          - name: limitrange
+            base:
+              apiVersion: kubernetes.m.crossplane.io/v1alpha1
+              kind: Object
+              spec:
+                watch: true
+                providerConfigRef:
+                  kind: ClusterProviderConfig
+                  name: in-cluster
+                forProvider:
+                  manifest:
+                    apiVersion: v1
+                    kind: LimitRange
+                    metadata:
+                      name: env-defaults
+                    spec:
+                      limits:
+                        - type: Container
+                          default:
+                            cpu: 500m
+                            memory: 512Mi
+                          defaultRequest:
+                            cpu: 100m
+                            memory: 128Mi
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: metadata.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-limitrange"
+              - type: PatchSet
+                patchSetName: in-env-namespace
+              - type: PatchSet
+                patchSetName: env-labels
+
+          # ---------------------------------------------------------------
+          # Network policy: deny everything, then allow what the platform
+          # knows is needed.
+          # ---------------------------------------------------------------
+          - name: netpol-default-deny
+            base:
+              apiVersion: kubernetes.m.crossplane.io/v1alpha1
+              kind: Object
+              spec:
+                watch: true
+                providerConfigRef:
+                  kind: ClusterProviderConfig
+                  name: in-cluster
+                forProvider:
+                  manifest:
+                    apiVersion: networking.k8s.io/v1
+                    kind: NetworkPolicy
+                    metadata:
+                      name: default-deny
+                    spec:
+                      podSelector: {}
+                      policyTypes: [Ingress, Egress]
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: metadata.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-netpol-default-deny"
+              - type: PatchSet
+                patchSetName: in-env-namespace
+              - type: PatchSet
+                patchSetName: env-labels
+
+          - name: netpol-allow-dns
+            base:
+              apiVersion: kubernetes.m.crossplane.io/v1alpha1
+              kind: Object
+              spec:
+                watch: true
+                providerConfigRef:
+                  kind: ClusterProviderConfig
+                  name: in-cluster
+                forProvider:
+                  manifest:
+                    apiVersion: networking.k8s.io/v1
+                    kind: NetworkPolicy
+                    metadata:
+                      name: allow-dns
+                    spec:
+                      podSelector: {}
+                      policyTypes: [Egress]
+                      egress:
+                        - to:
+                            - namespaceSelector:
+                                matchLabels:
+                                  kubernetes.io/metadata.name: kube-system
+                              podSelector:
+                                matchLabels:
+                                  k8s-app: kube-dns
+                          ports:
+                            - protocol: UDP
+                              port: 53
+                            - protocol: TCP
+                              port: 53
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: metadata.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-netpol-allow-dns"
+              - type: PatchSet
+                patchSetName: in-env-namespace
+              - type: PatchSet
+                patchSetName: env-labels
+
+          - name: netpol-allow-team
+            base:
+              apiVersion: kubernetes.m.crossplane.io/v1alpha1
+              kind: Object
+              spec:
+                watch: true
+                providerConfigRef:
+                  kind: ClusterProviderConfig
+                  name: in-cluster
+                forProvider:
+                  manifest:
+                    apiVersion: networking.k8s.io/v1
+                    kind: NetworkPolicy
+                    metadata:
+                      name: allow-same-team
+                    spec:
+                      podSelector:
+                        matchLabels:
+                          app.kubernetes.io/name: app
+                      policyTypes: [Ingress]
+                      ingress:
+                        - from:
+                            - namespaceSelector:
+                                matchLabels:
+                                  platform.example.io/team: TEAM
+                          ports:
+                            - protocol: TCP
+                              port: 8080
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: metadata.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-netpol-allow-team"
+              - type: PatchSet
+                patchSetName: in-env-namespace
+              - type: PatchSet
+                patchSetName: env-labels
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.labels[platform.example.io/team]
+                toFieldPath: spec.forProvider.manifest.spec.ingress[0].from[0].namespaceSelector.matchLabels[platform.example.io/team]
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.port
+                toFieldPath: spec.forProvider.manifest.spec.ingress[0].ports[0].port
+
+          # ---------------------------------------------------------------
+          # Application
+          # ---------------------------------------------------------------
+          - name: deployment
+            base:
+              apiVersion: kubernetes.m.crossplane.io/v1alpha1
+              kind: Object
+              spec:
+                watch: true
+                providerConfigRef:
+                  kind: ClusterProviderConfig
+                  name: in-cluster
+                readiness:
+                  # Ready only when every replica passes its readiness probe.
+                  # For environments with a database the probe runs a query,
+                  # so Ready also means "the app reached its database".
+                  policy: DeriveFromCelQuery
+                  celQuery: >-
+                    object.?status.?conditions.orValue([]).exists(c, c.type == 'Available' && c.status == 'True')
+                    && object.?status.?readyReplicas.orValue(0) == object.?spec.?replicas.orValue(1)
+                    && object.?status.?updatedReplicas.orValue(0) == object.?spec.?replicas.orValue(1)
+                forProvider:
+                  manifest:
+                    apiVersion: apps/v1
+                    kind: Deployment
+                    metadata:
+                      name: app
+                    spec:
+                      replicas: 1
+                      revisionHistoryLimit: 3
+                      selector:
+                        matchLabels:
+                          app.kubernetes.io/name: app
+                      template:
+                        metadata:
+                          labels:
+                            app.kubernetes.io/name: app
+                        spec:
+                          automountServiceAccountToken: false
+                          securityContext:
+                            runAsNonRoot: true
+                            seccompProfile:
+                              type: RuntimeDefault
+                          containers:
+                            - name: app
+                              image: IMAGE
+                              imagePullPolicy: IfNotPresent
+                              ports:
+                                - name: http
+                                  containerPort: 8080
+                              env:
+                                - name: PORT
+                                  value: "8080"
+                              envFrom:
+                                - secretRef:
+                                    name: app-db
+                                    optional: true
+                              readinessProbe:
+                                httpGet:
+                                  path: /readyz
+                                  port: http
+                                periodSeconds: 2
+                                failureThreshold: 2
+                              livenessProbe:
+                                httpGet:
+                                  path: /healthz
+                                  port: http
+                                periodSeconds: 10
+                              resources:
+                                requests:
+                                  cpu: 50m
+                                  memory: 64Mi
+                                limits:
+                                  cpu: 250m
+                                  memory: 128Mi
+                              securityContext:
+                                allowPrivilegeEscalation: false
+                                readOnlyRootFilesystem: true
+                                capabilities:
+                                  drop: [ALL]
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: metadata.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-deployment"
+              - type: PatchSet
+                patchSetName: in-env-namespace
+              - type: PatchSet
+                patchSetName: env-labels
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.image
+                toFieldPath: spec.forProvider.manifest.spec.template.spec.containers[0].image
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.port
+                toFieldPath: spec.forProvider.manifest.spec.template.spec.containers[0].ports[0].containerPort
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.port
+                toFieldPath: spec.forProvider.manifest.spec.template.spec.containers[0].env[0].value
+                transforms:
+                  - type: convert
+                    convert:
+                      toType: string
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.size
+                toFieldPath: spec.forProvider.manifest.spec.replicas
+                transforms:
+                  - type: map
+                    map:
+                      small: 1
+                      medium: 2
+              # With a database the credentials Secret is mandatory: the pod
+              # waits for it instead of starting without DATABASE_URL.
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.database
+                toFieldPath: spec.forProvider.manifest.spec.template.spec.containers[0].envFrom[0].secretRef.optional
+                transforms:
+                  - type: convert
+                    convert:
+                      toType: string
+                  - type: map
+                    map:
+                      "true": false
+                      "false": true
+
+          - name: service
+            base:
+              apiVersion: kubernetes.m.crossplane.io/v1alpha1
+              kind: Object
+              spec:
+                watch: true
+                providerConfigRef:
+                  kind: ClusterProviderConfig
+                  name: in-cluster
+                forProvider:
+                  manifest:
+                    apiVersion: v1
+                    kind: Service
+                    metadata:
+                      name: app
+                    spec:
+                      type: ClusterIP
+                      selector:
+                        app.kubernetes.io/name: app
+                      ports:
+                        - name: http
+                          port: 80
+                          targetPort: http
+                          protocol: TCP
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: metadata.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-service"
+              - type: PatchSet
+                patchSetName: in-env-namespace
+              - type: PatchSet
+                patchSetName: env-labels
+              - type: CombineToComposite
+                combine:
+                  variables:
+                    - fromFieldPath: spec.forProvider.manifest.metadata.name
+                    - fromFieldPath: spec.forProvider.manifest.metadata.namespace
+                  strategy: string
+                  string:
+                    fmt: "http://%s.%s.svc.cluster.local"
+                toFieldPath: status.endpoint
+
+          # ---------------------------------------------------------------
+          # exposure: public
+          # ---------------------------------------------------------------
+          - name: public-ingress
+            base:
+              apiVersion: kubernetes.m.crossplane.io/v1alpha1
+              kind: Object
+              spec:
+                watch: true
+                providerConfigRef:
+                  kind: ClusterProviderConfig
+                  name: in-cluster
+                forProvider:
+                  manifest:
+                    apiVersion: networking.k8s.io/v1
+                    kind: Ingress
+                    metadata:
+                      name: app
+                    spec:
+                      ingressClassName: public
+                      rules:
+                        - host: HOSTNAME
+                          http:
+                            paths:
+                              - path: /
+                                pathType: Prefix
+                                backend:
+                                  service:
+                                    name: app
+                                    port:
+                                      name: http
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: metadata.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-ingress"
+              - type: PatchSet
+                patchSetName: in-env-namespace
+              - type: PatchSet
+                patchSetName: env-labels
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.hostname
+                toFieldPath: spec.forProvider.manifest.spec.rules[0].host
+
+          - name: public-netpol-ingress-controller
+            base:
+              apiVersion: kubernetes.m.crossplane.io/v1alpha1
+              kind: Object
+              spec:
+                watch: true
+                providerConfigRef:
+                  kind: ClusterProviderConfig
+                  name: in-cluster
+                forProvider:
+                  manifest:
+                    apiVersion: networking.k8s.io/v1
+                    kind: NetworkPolicy
+                    metadata:
+                      name: allow-ingress-controller
+                    spec:
+                      podSelector:
+                        matchLabels:
+                          app.kubernetes.io/name: app
+                      policyTypes: [Ingress]
+                      ingress:
+                        - from:
+                            - namespaceSelector:
+                                matchLabels:
+                                  kubernetes.io/metadata.name: ingress-system
+                          ports:
+                            - protocol: TCP
+                              port: 8080
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: metadata.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-netpol-ingress-controller"
+              - type: PatchSet
+                patchSetName: in-env-namespace
+              - type: PatchSet
+                patchSetName: env-labels
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.port
+                toFieldPath: spec.forProvider.manifest.spec.ingress[0].ports[0].port
+
+          # ---------------------------------------------------------------
+          # database: true
+          # ---------------------------------------------------------------
+          - name: db-release
+            base:
+              apiVersion: helm.m.crossplane.io/v1beta1
+              kind: Release
+              metadata:
+                annotations:
+                  # Helm release name inside the environment namespace.
+                  crossplane.io/external-name: db
+              spec:
+                providerConfigRef:
+                  kind: ClusterProviderConfig
+                  name: in-cluster
+                forProvider:
+                  chart:
+                    name: cluster
+                    repository: https://cloudnative-pg.github.io/charts
+                    version: 0.9.0
+                  namespace: NAMESPACE
+                  values:
+                    fullnameOverride: db
+                    type: postgresql
+                    mode: standalone
+                    version:
+                      postgresql: "18"
+                    cluster:
+                      instances: 1
+                      imageName: ghcr.io/cloudnative-pg/postgresql:18.6-minimal-trixie@sha256:64abc98a4387361afd6821a3a99f975763bbd87bbdde9449e75ad6002528a318
+                      enableSuperuserAccess: false
+                      enablePDB: false
+                      storage:
+                        size: 1Gi
+                      resources: {}
+                      monitoring:
+                        enabled: false
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: metadata.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-db"
+              - type: CombineFromComposite
+                combine:
+                  variables:
+                    - fromFieldPath: metadata.labels[platform.example.io/team]
+                    - fromFieldPath: metadata.name
+                  strategy: string
+                  string:
+                    fmt: "%s-%s"
+                toFieldPath: spec.forProvider.namespace
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.size
+                toFieldPath: spec.forProvider.values.cluster.storage.size
+                transforms:
+                  - type: map
+                    map:
+                      small: 1Gi
+                      medium: 5Gi
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.size
+                toFieldPath: spec.forProvider.values.cluster.resources
+                transforms:
+                  - type: map
+                    map:
+                      small:
+                        requests:
+                          cpu: 100m
+                          memory: 256Mi
+                        limits:
+                          cpu: 500m
+                          memory: 512Mi
+                      medium:
+                        requests:
+                          cpu: 250m
+                          memory: 512Mi
+                        limits:
+                          cpu: "1"
+                          memory: 1Gi
+
+          # Copies the credentials CloudNativePG creates into the platform's
+          # Secret contract (app-db: DATABASE_URL + libpq PG* variables).
+          - name: db-credentials
+            base:
+              apiVersion: kubernetes.m.crossplane.io/v1alpha1
+              kind: Object
+              spec:
+                watch: true
+                providerConfigRef:
+                  kind: ClusterProviderConfig
+                  name: in-cluster
+                references:
+                  - patchesFrom:
+                      apiVersion: v1
+                      kind: Secret
+                      name: db-app
+                      fieldPath: data.uri
+                    toFieldPath: data.DATABASE_URL
+                  - patchesFrom:
+                      apiVersion: v1
+                      kind: Secret
+                      name: db-app
+                      fieldPath: data.host
+                    toFieldPath: data.PGHOST
+                  - patchesFrom:
+                      apiVersion: v1
+                      kind: Secret
+                      name: db-app
+                      fieldPath: data.port
+                    toFieldPath: data.PGPORT
+                  - patchesFrom:
+                      apiVersion: v1
+                      kind: Secret
+                      name: db-app
+                      fieldPath: data.dbname
+                    toFieldPath: data.PGDATABASE
+                  - patchesFrom:
+                      apiVersion: v1
+                      kind: Secret
+                      name: db-app
+                      fieldPath: data.username
+                    toFieldPath: data.PGUSER
+                  - patchesFrom:
+                      apiVersion: v1
+                      kind: Secret
+                      name: db-app
+                      fieldPath: data.password
+                    toFieldPath: data.PGPASSWORD
+                forProvider:
+                  manifest:
+                    apiVersion: v1
+                    kind: Secret
+                    type: Opaque
+                    metadata:
+                      name: app-db
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: metadata.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-db-credentials"
+              - type: PatchSet
+                patchSetName: in-env-namespace
+              - type: PatchSet
+                patchSetName: env-labels
+              - type: CombineFromComposite
+                combine:
+                  variables:
+                    - fromFieldPath: metadata.labels[platform.example.io/team]
+                    - fromFieldPath: metadata.name
+                  strategy: string
+                  string:
+                    fmt: "%s-%s"
+                toFieldPath: spec.references[0].patchesFrom.namespace
+              - type: CombineFromComposite
+                combine:
+                  variables:
+                    - fromFieldPath: metadata.labels[platform.example.io/team]
+                    - fromFieldPath: metadata.name
+                  strategy: string
+                  string:
+                    fmt: "%s-%s"
+                toFieldPath: spec.references[1].patchesFrom.namespace
+              - type: CombineFromComposite
+                combine:
+                  variables:
+                    - fromFieldPath: metadata.labels[platform.example.io/team]
+                    - fromFieldPath: metadata.name
+                  strategy: string
+                  string:
+                    fmt: "%s-%s"
+                toFieldPath: spec.references[2].patchesFrom.namespace
+              - type: CombineFromComposite
+                combine:
+                  variables:
+                    - fromFieldPath: metadata.labels[platform.example.io/team]
+                    - fromFieldPath: metadata.name
+                  strategy: string
+                  string:
+                    fmt: "%s-%s"
+                toFieldPath: spec.references[3].patchesFrom.namespace
+              - type: CombineFromComposite
+                combine:
+                  variables:
+                    - fromFieldPath: metadata.labels[platform.example.io/team]
+                    - fromFieldPath: metadata.name
+                  strategy: string
+                  string:
+                    fmt: "%s-%s"
+                toFieldPath: spec.references[4].patchesFrom.namespace
+              - type: CombineFromComposite
+                combine:
+                  variables:
+                    - fromFieldPath: metadata.labels[platform.example.io/team]
+                    - fromFieldPath: metadata.name
+                  strategy: string
+                  string:
+                    fmt: "%s-%s"
+                toFieldPath: spec.references[5].patchesFrom.namespace
+              - type: ToCompositeFieldPath
+                fromFieldPath: spec.forProvider.manifest.metadata.name
+                toFieldPath: status.databaseSecret
+
+          - name: db-netpol-app-egress
+            base:
+              apiVersion: kubernetes.m.crossplane.io/v1alpha1
+              kind: Object
+              spec:
+                watch: true
+                providerConfigRef:
+                  kind: ClusterProviderConfig
+                  name: in-cluster
+                forProvider:
+                  manifest:
+                    apiVersion: networking.k8s.io/v1
+                    kind: NetworkPolicy
+                    metadata:
+                      name: allow-app-to-db
+                    spec:
+                      podSelector:
+                        matchLabels:
+                          app.kubernetes.io/name: app
+                      policyTypes: [Egress]
+                      egress:
+                        - to:
+                            - podSelector:
+                                matchLabels:
+                                  cnpg.io/cluster: db
+                          ports:
+                            - protocol: TCP
+                              port: 5432
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: metadata.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-netpol-app-to-db"
+              - type: PatchSet
+                patchSetName: in-env-namespace
+              - type: PatchSet
+                patchSetName: env-labels
+
+          - name: db-netpol-db
+            base:
+              apiVersion: kubernetes.m.crossplane.io/v1alpha1
+              kind: Object
+              spec:
+                watch: true
+                providerConfigRef:
+                  kind: ClusterProviderConfig
+                  name: in-cluster
+                forProvider:
+                  manifest:
+                    apiVersion: networking.k8s.io/v1
+                    kind: NetworkPolicy
+                    metadata:
+                      name: allow-db
+                    spec:
+                      podSelector:
+                        matchLabels:
+                          cnpg.io/cluster: db
+                      policyTypes: [Ingress, Egress]
+                      ingress:
+                        # The application, and nothing else in the namespace.
+                        - from:
+                            - podSelector:
+                                matchLabels:
+                                  app.kubernetes.io/name: app
+                          ports:
+                            - protocol: TCP
+                              port: 5432
+                        # The CloudNativePG operator (status endpoint + SQL).
+                        - from:
+                            - namespaceSelector:
+                                matchLabels:
+                                  kubernetes.io/metadata.name: cnpg-system
+                          ports:
+                            - protocol: TCP
+                              port: 8000
+                            - protocol: TCP
+                              port: 5432
+                      egress:
+                        # The instance manager talks to the Kubernetes API.
+                        - ports:
+                            - protocol: TCP
+                              port: 443
+                            - protocol: TCP
+                              port: 6443
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: metadata.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-netpol-db"
+              - type: PatchSet
+                patchSetName: in-env-namespace
+              - type: PatchSet
+                patchSetName: env-labels
+
+          # Deletion order: the namespace Object cannot be deleted while the
+          # Helm release still exists, so Helm uninstalls cleanly first.
+          - name: db-usage
+            base:
+              apiVersion: protection.crossplane.io/v1beta1
+              kind: Usage
+              spec:
+                replayDeletion: true
+                of:
+                  apiVersion: kubernetes.m.crossplane.io/v1alpha1
+                  kind: Object
+                  resourceRef:
+                    name: NAMESPACE_OBJECT
+                by:
+                  apiVersion: helm.m.crossplane.io/v1beta1
+                  kind: Release
+                  resourceRef:
+                    name: RELEASE
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: metadata.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-db-uses-namespace"
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: spec.of.resourceRef.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-namespace"
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: spec.by.resourceRef.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-db"
+            readinessChecks:
+              - type: None
+
+    - step: filter-optional-resources
+      functionRef:
+        name: function-cel-filter
+      input:
+        apiVersion: cel.fn.crossplane.io/v1beta1
+        kind: Filters
+        filters:
+          - name: "db-.*"
+            expression: >-
+              has(observed.composite.resource.spec.database)
+              && observed.composite.resource.spec.database == true
+          - name: "public-.*"
+            expression: >-
+              has(observed.composite.resource.spec.exposure)
+              && observed.composite.resource.spec.exposure == "public"

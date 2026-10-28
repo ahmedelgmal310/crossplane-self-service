@@ -1,0 +1,11 @@
+# Rejected by the XRD OpenAPI schema: size is an enum.
+apiVersion: platform.example.io/v1alpha1
+kind: AppEnvironment
+metadata:
+  name: big-batch
+  namespace: team-payments
+  labels:
+    platform.example.io/team: payments
+spec:
+  size: xlarge
+  image: "env-probe:e2e"

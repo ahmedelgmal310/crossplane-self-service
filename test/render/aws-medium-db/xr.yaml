@@ -1,0 +1,14 @@
+apiVersion: platform.example.io/v1alpha1
+kind: AppEnvironment
+metadata:
+  name: checkout-api
+  namespace: team-payments
+  labels:
+    platform.example.io/team: payments
+spec:
+  size: medium
+  database: true
+  exposure: public
+  hostname: checkout.payments.apps.example.test
+  image: "env-probe:e2e"
+  port: 8080

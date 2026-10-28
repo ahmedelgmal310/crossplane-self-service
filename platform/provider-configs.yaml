@@ -1,0 +1,16 @@
+# Both providers act on the cluster they run in, with their own ServiceAccount.
+apiVersion: kubernetes.m.crossplane.io/v1alpha1
+kind: ClusterProviderConfig
+metadata:
+  name: in-cluster
+spec:
+  credentials:
+    source: InjectedIdentity
+---
+apiVersion: helm.m.crossplane.io/v1beta1
+kind: ClusterProviderConfig
+metadata:
+  name: in-cluster
+spec:
+  credentials:
+    source: InjectedIdentity

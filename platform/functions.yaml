@@ -1,0 +1,15 @@
+# Composition functions, pinned by tag and digest. The same file is used by
+# the cluster (kubectl apply) and by `crossplane composition render` in CI.
+apiVersion: pkg.crossplane.io/v1
+kind: Function
+metadata:
+  name: function-patch-and-transform
+spec:
+  package: xpkg.crossplane.io/crossplane-contrib/function-patch-and-transform:v0.11.0@sha256:677ad7d06eab2da219c9f28a7f6393fd74e5cfe445b98e324a23736163fb4e99
+---
+apiVersion: pkg.crossplane.io/v1
+kind: Function
+metadata:
+  name: function-cel-filter
+spec:
+  package: xpkg.crossplane.io/crossplane-contrib/function-cel-filter:v0.2.0@sha256:d5c77d75131b2cfdb2df013cc62c58e2e73fc3add947c3798a2963b16322f35f

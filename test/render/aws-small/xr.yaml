@@ -1,0 +1,13 @@
+apiVersion: platform.example.io/v1alpha1
+kind: AppEnvironment
+metadata:
+  name: preview
+  namespace: team-payments
+  labels:
+    platform.example.io/team: payments
+spec:
+  size: small
+  database: false
+  exposure: internal
+  image: "env-probe:e2e"
+  port: 8080
