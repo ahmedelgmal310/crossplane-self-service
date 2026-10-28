@@ -286,7 +286,8 @@ wait_until 120 "XR Ready after drift" xr_ready "$SMALL"
 log "8. Delete and prove nothing is orphaned"
 leftovers() { # <xr> <env-namespace>: prints anything that still exists
   local xr=$1 ns=$2
-  jp ns "$ns" -o name || true
+  # namespace/<name> plus, while it terminates, the reason it is still there
+  jp ns "$ns" -o jsonpath='namespace/{.metadata.name}{range .status.conditions[?(@.status=="True")]}[{.type}]{end}{"\n"}' || true
   jp objects.kubernetes.m.crossplane.io,releases.helm.m.crossplane.io,usages.protection.crossplane.io \
     -n "$TEAM_NS" -l "crossplane.io/composite=$xr" -o name || true
   jp clusters.postgresql.cnpg.io -A -o json | jq -r --arg ns "$ns" '.items[] | select(.metadata.namespace == $ns) | "cluster/\(.metadata.name)"' || true
@@ -301,8 +302,19 @@ for xr in "$MEDIUM" "$SMALL"; do
   ns="payments-${xr}"
   t=$(now_ms)
   kubectl delete appenvironment "$xr" -n "$TEAM_NS" "${DEV_PAYMENTS[@]}" --wait=false
-  wait_until 600 "$xr to be deleted" bash -c "! kubectl get appenvironment $xr -n $TEAM_NS"
-  wait_until 300 "everything $xr created to be gone" no_leftovers "$xr" "$ns"
+  # Log what is still there each time the set changes, so a slow deletion
+  # shows which object held it up.
+  last="" deadline=$(($(date +%s) + 600))
+  while :; do
+    left=$({ jp appenvironment "$xr" -n "$TEAM_NS" -o name || true; leftovers "$xr" "$ns"; } | sort | tr '\n' ' ')
+    if [[ "$left" != "$last" ]]; then
+      printf '  +%ss remaining: %s\n' "$(secs "$t" "$(now_ms)")" "${left:-nothing}" | tee -a "$RESULTS_DIR/deletion-${xr}.log"
+      last=$left
+    fi
+    [[ -z "$left" ]] && break
+    (($(date +%s) < deadline)) || fail "$xr not fully deleted within 600s"
+    sleep 0.5
+  done
   record "delete_${xr//-/_}_s" "$(secs "$t" "$(now_ms)")" "Delete $xr until the XR, its namespace, managed resources, PVs and labelled objects are all gone"
   pass "$xr: no orphans (namespace, MRs, Usage, CNPG cluster, PVs, labelled objects)"
 done

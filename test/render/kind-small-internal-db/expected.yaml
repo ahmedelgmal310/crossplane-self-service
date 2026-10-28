@@ -190,11 +190,6 @@ spec:
   providerConfigRef:
     kind: ClusterProviderConfig
     name: in-cluster
-  references:
-  - dependsOn:
-      apiVersion: v1
-      kind: Namespace
-      name: growth-ledger
   watch: true
 ---
 apiVersion: kubernetes.m.crossplane.io/v1alpha1
@@ -257,11 +252,6 @@ spec:
   providerConfigRef:
     kind: ClusterProviderConfig
     name: in-cluster
-  references:
-  - dependsOn:
-      apiVersion: v1
-      kind: Namespace
-      name: growth-ledger
   watch: true
 ---
 apiVersion: helm.m.crossplane.io/v1beta1
@@ -432,11 +422,6 @@ spec:
       && c.status == 'True') && object.?status.?readyReplicas.orValue(0) == object.?spec.?replicas.orValue(1)
       && object.?status.?updatedReplicas.orValue(0) == object.?spec.?replicas.orValue(1)
     policy: DeriveFromCelQuery
-  references:
-  - dependsOn:
-      apiVersion: v1
-      kind: Namespace
-      name: growth-ledger
   watch: true
 ---
 apiVersion: kubernetes.m.crossplane.io/v1alpha1
@@ -478,11 +463,6 @@ spec:
   providerConfigRef:
     kind: ClusterProviderConfig
     name: in-cluster
-  references:
-  - dependsOn:
-      apiVersion: v1
-      kind: Namespace
-      name: growth-ledger
   watch: true
 ---
 apiVersion: kubernetes.m.crossplane.io/v1alpha1
@@ -567,11 +547,6 @@ spec:
   providerConfigRef:
     kind: ClusterProviderConfig
     name: in-cluster
-  references:
-  - dependsOn:
-      apiVersion: v1
-      kind: Namespace
-      name: growth-ledger
   watch: true
 ---
 apiVersion: kubernetes.m.crossplane.io/v1alpha1
@@ -618,11 +593,6 @@ spec:
   providerConfigRef:
     kind: ClusterProviderConfig
     name: in-cluster
-  references:
-  - dependsOn:
-      apiVersion: v1
-      kind: Namespace
-      name: growth-ledger
   watch: true
 ---
 apiVersion: kubernetes.m.crossplane.io/v1alpha1
@@ -660,11 +630,6 @@ spec:
   providerConfigRef:
     kind: ClusterProviderConfig
     name: in-cluster
-  references:
-  - dependsOn:
-      apiVersion: v1
-      kind: Namespace
-      name: growth-ledger
   watch: true
 ---
 apiVersion: kubernetes.m.crossplane.io/v1alpha1
@@ -707,11 +672,6 @@ spec:
   providerConfigRef:
     kind: ClusterProviderConfig
     name: in-cluster
-  references:
-  - dependsOn:
-      apiVersion: v1
-      kind: Namespace
-      name: growth-ledger
   watch: true
 ---
 apiVersion: kubernetes.m.crossplane.io/v1alpha1
@@ -753,9 +713,4 @@ spec:
   providerConfigRef:
     kind: ClusterProviderConfig
     name: in-cluster
-  references:
-  - dependsOn:
-      apiVersion: v1
-      kind: Namespace
-      name: growth-ledger
   watch: true
