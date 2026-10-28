@@ -147,6 +147,8 @@ kubectl get appenvironments -n "$TEAM_NS" -o json |
 kubectl get events -n "$TEAM_NS" --field-selector involvedObject.kind=AppEnvironment \
   -o custom-columns=TIME:.lastTimestamp,OBJECT:.involvedObject.name,REASON:.reason,COUNT:.count,MESSAGE:.message |
   tee "$RESULTS_DIR/xr-events.txt"
+record xr_responsive "small=$(xr_condition "$SMALL" Responsive), medium=$(xr_condition "$MEDIUM" Responsive)" \
+  "XR Responsive condition after provisioning (False = watch circuit breaker opened and events were throttled)"
 
 # ---------------------------------------------------------------------------
 log "4. Environment contents follow the claim"

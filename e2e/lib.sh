@@ -6,6 +6,14 @@ set -euo pipefail
 
 CROSSPLANE_CHART_VERSION="2.4.3"
 CROSSPLANE_IMAGE_TAG="v2.4.3@sha256:1c66261d805a73cade46e2ac94b665c73aebd4a00844de5fcae4bcadaa2be638"
+# Realtime compositions put every watch event from a composed resource through a
+# per-XR token bucket (default burst 100, refill 1/s). Creating a 15-resource
+# environment emits more than 100 events in its first seconds (each Object's
+# status mirrors its live object), the breaker opens, and the XR only sees its
+# resources become ready on 30s half-open probes. Measured in CI with the
+# defaults: Responsive=False (WatchCircuitOpen) and ~58s to Ready although every
+# composed resource was Ready at 29s. These limits still stop a hot loop.
+CROSSPLANE_ARGS="{--circuit-breaker-burst=500,--circuit-breaker-refill-rate=10}"
 CNPG_CHART_VERSION="0.29.1"
 CNPG_IMAGE_TAG="1.30.1@sha256:923c267ec29636db3bee20f993d0ec4973fa22998e1adad37da79e4d32b5bc07"
 # Same image the Composition gives the database; used for network-policy probes.

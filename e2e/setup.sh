@@ -13,6 +13,7 @@ helm upgrade --install crossplane crossplane \
   --repo https://charts.crossplane.io/stable --version "$CROSSPLANE_CHART_VERSION" \
   --namespace crossplane-system --create-namespace \
   --set image.tag="$CROSSPLANE_IMAGE_TAG" \
+  --set "args=${CROSSPLANE_ARGS}" \
   --wait --timeout 5m
 
 log "CloudNativePG operator (chart ${CNPG_CHART_VERSION})"
