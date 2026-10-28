@@ -116,7 +116,31 @@ small_count=$(count_composed "$SMALL")
 medium_count=$(count_composed "$MEDIUM")
 record composed_small "$small_count" "Resources composed for the small claim"
 record composed_medium "$medium_count" "Resources composed for the medium + database + public claim"
-kubectl get appenvironments -n "$TEAM_NS" -o wide
+kubectl get appenvironments -n "$TEAM_NS" -o wide | tee "$RESULTS_DIR/appenvironments.txt"
+
+# Where the time goes: when each composed resource was created and became
+# Ready, in seconds after the claim was created (API timestamps, 1s resolution).
+timeline() {
+  local created
+  created=$(kubectl get appenvironment "$1" -n "$TEAM_NS" -o jsonpath='{.metadata.creationTimestamp}')
+  kubectl get objects.kubernetes.m.crossplane.io,releases.helm.m.crossplane.io -n "$TEAM_NS" \
+    -l "crossplane.io/composite=$1" -o json |
+    jq -r --arg c "$created" '.items[]
+      | [ .metadata.annotations["crossplane.io/composition-resource-name"],
+          ((.metadata.creationTimestamp | fromdate) - ($c | fromdate)),
+          (([.status.conditions[]? | select(.type == "Ready" and .status == "True") | .lastTransitionTime][0] // empty | fromdate) - ($c | fromdate)) ]
+      | @tsv' | sort -t$'\t' -k3 -n
+}
+for xr in "$SMALL" "$MEDIUM"; do
+  {
+    echo "### Timeline: $xr (seconds after the claim was created)"
+    echo
+    echo "| Composed resource | Created | Ready |"
+    echo "|---|---|---|"
+    timeline "$xr" | awk -F'\t' '{ printf "| %s | %s | %s |\n", $1, $2, $3 }'
+    echo
+  } | tee -a "$RESULTS_DIR/timeline.md"
+done
 
 # ---------------------------------------------------------------------------
 log "4. Environment contents follow the claim"
@@ -210,28 +234,40 @@ pass "team relabel rejected"
 
 # ---------------------------------------------------------------------------
 log "7. Drift correction"
+# Each case proves the change really happened (a new UID, or the API returning
+# the tampered value) before timing the repair, so a fast number cannot come
+# from a no-op.
+uid_of() { jp "$@" -o jsonpath='{.metadata.uid}'; }
+
+old_uid=$(uid_of networkpolicy default-deny -n "$SMALL_NS")
 t=$(now_ms)
 kubectl delete networkpolicy default-deny -n "$SMALL_NS"
-wait_until 300 "default-deny NetworkPolicy to be recreated" jp networkpolicy default-deny -n "$SMALL_NS"
-record drift_netpol_s "$(secs "$t" "$(now_ms)")" "kubectl delete of the default-deny NetworkPolicy until it exists again"
-pass "deleted NetworkPolicy recreated"
+netpol_back() { local u; u=$(uid_of networkpolicy default-deny -n "$SMALL_NS") && [[ -n "$u" && "$u" != "$old_uid" ]]; }
+wait_until 300 "default-deny NetworkPolicy to be recreated" netpol_back
+record drift_netpol_s "$(secs "$t" "$(now_ms)")" "kubectl delete of the default-deny NetworkPolicy until a new one (new UID) exists"
+pass "deleted NetworkPolicy recreated (uid $old_uid -> $(uid_of networkpolicy default-deny -n "$SMALL_NS"))"
 
 t=$(now_ms)
-kubectl patch resourcequota env-quota -n "$SMALL_NS" --type merge -p '{"spec":{"hard":{"pods":"999"}}}'
+tampered=$(kubectl patch resourcequota env-quota -n "$SMALL_NS" --type merge \
+  -p '{"spec":{"hard":{"pods":"999"}}}' -o jsonpath='{.spec.hard.pods}')
+[[ "$tampered" == "999" ]] || fail "quota patch did not take effect (got $tampered)"
 quota_reverted() { [[ "$(jp resourcequota env-quota -n "$SMALL_NS" -o jsonpath='{.spec.hard.pods}')" == "20" ]]; }
 wait_until 300 "ResourceQuota edit to be reverted" quota_reverted
-record drift_quota_s "$(secs "$t" "$(now_ms)")" "Manual quota raise (pods 20 -> 999) until reverted to 20"
-pass "hand-edited ResourceQuota reverted"
+record drift_quota_s "$(secs "$t" "$(now_ms)")" "Manual quota raise (API accepted pods=999) until reverted to 20"
+pass "hand-edited ResourceQuota reverted (999 accepted by the API, back to 20)"
 
+old_uid=$(uid_of deploy app -n "$SMALL_NS")
 t=$(now_ms)
 kubectl delete objects.kubernetes.m.crossplane.io "${SMALL}-deployment" -n "$TEAM_NS"
 app_back() {
-  [[ "$(jp objects.kubernetes.m.crossplane.io "${SMALL}-deployment" -n "$TEAM_NS" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}')" == "True" ]] &&
+  local u
+  u=$(uid_of deploy app -n "$SMALL_NS") && [[ -n "$u" && "$u" != "$old_uid" ]] &&
+    [[ "$(jp objects.kubernetes.m.crossplane.io "${SMALL}-deployment" -n "$TEAM_NS" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}')" == "True" ]] &&
     [[ "$(jp deploy app -n "$SMALL_NS" -o jsonpath='{.status.readyReplicas}')" == "2" ]]
 }
 wait_until 300 "deleted Deployment MR to be recomposed" app_back
-record drift_mr_s "$(secs "$t" "$(now_ms)")" "Delete the composed Deployment Object (and with it the Deployment) until both are back and 2/2 ready"
-pass "deleted managed resource recomposed by Crossplane"
+record drift_mr_s "$(secs "$t" "$(now_ms)")" "Delete the composed Deployment Object (the provider deletes the Deployment) until a new Deployment (new UID) is 2/2 ready"
+pass "deleted managed resource recomposed by Crossplane (Deployment uid $old_uid -> $(uid_of deploy app -n "$SMALL_NS"))"
 wait_until 120 "XR Ready after drift" xr_ready "$SMALL"
 
 # ---------------------------------------------------------------------------
@@ -278,6 +314,8 @@ log "Summary"
   echo "| Claim | API server response |"
   echo "|---|---|"
   cat "$RESULTS_DIR/rejections.md"
+  echo
+  cat "$RESULTS_DIR/timeline.md"
 } | tee "$RESULTS_DIR/summary.md"
 jq -R -s 'split("\n") | map(select(length > 0) | split("\t") | {(.[0]): .[1]}) | add' "$RESULTS_TSV" >"$RESULTS_DIR/results.json"
 if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then cat "$RESULTS_DIR/summary.md" >>"$GITHUB_STEP_SUMMARY"; fi
