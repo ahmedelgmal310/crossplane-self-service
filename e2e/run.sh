@@ -220,10 +220,14 @@ record netpol_checks "3/3" "Network policy probes: app allowed, other pod in nam
 log "6. Day 2: resize ${SMALL} small -> medium"
 t=$(now_ms)
 kubectl patch appenvironment "$SMALL" -n "$TEAM_NS" "${DEV_PAYMENTS[@]}" --type merge -p '{"spec":{"size":"medium"}}'
+# Ready must be reported for the new generation of the claim, and the
+# Deployment status must describe its latest spec, so stale status cannot pass.
 resized() {
   [[ "$(jp resourcequota env-quota -n "$SMALL_NS" -o jsonpath='{.spec.hard.pods}')" == "20" ]] &&
-    [[ "$(jp deploy app -n "$SMALL_NS" -o jsonpath='{.status.readyReplicas}')" == "2" ]] &&
-    xr_ready "$SMALL"
+    [[ "$(jp deploy app -n "$SMALL_NS" -o jsonpath='{.status.observedGeneration}/{.metadata.generation} {.status.readyReplicas}')" =~ ^([0-9]+)/([0-9]+)\ 2$ ]] &&
+    [[ "${BASH_REMATCH[1]}" == "${BASH_REMATCH[2]}" ]] &&
+    [[ "$(jp appenvironment "$SMALL" -n "$TEAM_NS" -o jsonpath='{.metadata.generation} {.status.conditions[?(@.type=="Ready")].observedGeneration} {.status.conditions[?(@.type=="Ready")].status}')" =~ ^([0-9]+)\ ([0-9]+)\ True$ ]] &&
+    [[ "${BASH_REMATCH[1]}" == "${BASH_REMATCH[2]}" ]]
 }
 wait_until 300 "resize to reconcile" resized
 record resize_s "$(secs "$t" "$(now_ms)")" "Resize small -> medium: quota updated, second replica ready, XR Ready again"

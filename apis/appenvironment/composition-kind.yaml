@@ -36,6 +36,21 @@ spec:
                   string:
                     fmt: "%s-%s"
                 toFieldPath: spec.forProvider.manifest.metadata.namespace
+          # Objects in the environment namespace wait for it to exist. With
+          # watch: true the provider also watches the reference, so they are
+          # applied the moment the namespace appears instead of on a retry
+          # backoff.
+          - name: wait-for-namespace
+            patches:
+              - type: CombineFromComposite
+                combine:
+                  variables:
+                    - fromFieldPath: metadata.labels[platform.example.io/team]
+                    - fromFieldPath: metadata.name
+                  strategy: string
+                  string:
+                    fmt: "%s-%s"
+                toFieldPath: spec.references[0].dependsOn.name
           - name: env-labels
             patches:
               - type: FromCompositeFieldPath
@@ -99,6 +114,11 @@ spec:
               kind: Object
               spec:
                 watch: true
+                references:
+                  - dependsOn:
+                      apiVersion: v1
+                      kind: Namespace
+                      name: NAMESPACE
                 providerConfigRef:
                   kind: ClusterProviderConfig
                   name: in-cluster
@@ -119,6 +139,8 @@ spec:
                       fmt: "%s-quota"
               - type: PatchSet
                 patchSetName: in-env-namespace
+              - type: PatchSet
+                patchSetName: wait-for-namespace
               - type: PatchSet
                 patchSetName: env-labels
               - type: FromCompositeFieldPath
@@ -152,6 +174,11 @@ spec:
               kind: Object
               spec:
                 watch: true
+                references:
+                  - dependsOn:
+                      apiVersion: v1
+                      kind: Namespace
+                      name: NAMESPACE
                 providerConfigRef:
                   kind: ClusterProviderConfig
                   name: in-cluster
@@ -182,6 +209,8 @@ spec:
               - type: PatchSet
                 patchSetName: in-env-namespace
               - type: PatchSet
+                patchSetName: wait-for-namespace
+              - type: PatchSet
                 patchSetName: env-labels
 
           # ---------------------------------------------------------------
@@ -194,6 +223,11 @@ spec:
               kind: Object
               spec:
                 watch: true
+                references:
+                  - dependsOn:
+                      apiVersion: v1
+                      kind: Namespace
+                      name: NAMESPACE
                 providerConfigRef:
                   kind: ClusterProviderConfig
                   name: in-cluster
@@ -218,6 +252,8 @@ spec:
               - type: PatchSet
                 patchSetName: in-env-namespace
               - type: PatchSet
+                patchSetName: wait-for-namespace
+              - type: PatchSet
                 patchSetName: env-labels
 
           - name: netpol-allow-dns
@@ -226,6 +262,11 @@ spec:
               kind: Object
               spec:
                 watch: true
+                references:
+                  - dependsOn:
+                      apiVersion: v1
+                      kind: Namespace
+                      name: NAMESPACE
                 providerConfigRef:
                   kind: ClusterProviderConfig
                   name: in-cluster
@@ -263,6 +304,8 @@ spec:
               - type: PatchSet
                 patchSetName: in-env-namespace
               - type: PatchSet
+                patchSetName: wait-for-namespace
+              - type: PatchSet
                 patchSetName: env-labels
 
           - name: netpol-allow-team
@@ -271,6 +314,11 @@ spec:
               kind: Object
               spec:
                 watch: true
+                references:
+                  - dependsOn:
+                      apiVersion: v1
+                      kind: Namespace
+                      name: NAMESPACE
                 providerConfigRef:
                   kind: ClusterProviderConfig
                   name: in-cluster
@@ -305,6 +353,8 @@ spec:
               - type: PatchSet
                 patchSetName: in-env-namespace
               - type: PatchSet
+                patchSetName: wait-for-namespace
+              - type: PatchSet
                 patchSetName: env-labels
               - type: FromCompositeFieldPath
                 fromFieldPath: metadata.labels[platform.example.io/team]
@@ -322,6 +372,11 @@ spec:
               kind: Object
               spec:
                 watch: true
+                references:
+                  - dependsOn:
+                      apiVersion: v1
+                      kind: Namespace
+                      name: NAMESPACE
                 providerConfigRef:
                   kind: ClusterProviderConfig
                   name: in-cluster
@@ -405,6 +460,8 @@ spec:
               - type: PatchSet
                 patchSetName: in-env-namespace
               - type: PatchSet
+                patchSetName: wait-for-namespace
+              - type: PatchSet
                 patchSetName: env-labels
               - type: FromCompositeFieldPath
                 fromFieldPath: spec.image
@@ -447,6 +504,11 @@ spec:
               kind: Object
               spec:
                 watch: true
+                references:
+                  - dependsOn:
+                      apiVersion: v1
+                      kind: Namespace
+                      name: NAMESPACE
                 providerConfigRef:
                   kind: ClusterProviderConfig
                   name: in-cluster
@@ -477,6 +539,8 @@ spec:
               - type: PatchSet
                 patchSetName: in-env-namespace
               - type: PatchSet
+                patchSetName: wait-for-namespace
+              - type: PatchSet
                 patchSetName: env-labels
               - type: CombineToComposite
                 combine:
@@ -497,6 +561,11 @@ spec:
               kind: Object
               spec:
                 watch: true
+                references:
+                  - dependsOn:
+                      apiVersion: v1
+                      kind: Namespace
+                      name: NAMESPACE
                 providerConfigRef:
                   kind: ClusterProviderConfig
                   name: in-cluster
@@ -531,6 +600,8 @@ spec:
               - type: PatchSet
                 patchSetName: in-env-namespace
               - type: PatchSet
+                patchSetName: wait-for-namespace
+              - type: PatchSet
                 patchSetName: env-labels
               - type: FromCompositeFieldPath
                 fromFieldPath: spec.hostname
@@ -542,6 +613,11 @@ spec:
               kind: Object
               spec:
                 watch: true
+                references:
+                  - dependsOn:
+                      apiVersion: v1
+                      kind: Namespace
+                      name: NAMESPACE
                 providerConfigRef:
                   kind: ClusterProviderConfig
                   name: in-cluster
@@ -575,6 +651,8 @@ spec:
                       fmt: "%s-netpol-ingress-controller"
               - type: PatchSet
                 patchSetName: in-env-namespace
+              - type: PatchSet
+                patchSetName: wait-for-namespace
               - type: PatchSet
                 patchSetName: env-labels
               - type: FromCompositeFieldPath
@@ -797,6 +875,11 @@ spec:
               kind: Object
               spec:
                 watch: true
+                references:
+                  - dependsOn:
+                      apiVersion: v1
+                      kind: Namespace
+                      name: NAMESPACE
                 providerConfigRef:
                   kind: ClusterProviderConfig
                   name: in-cluster
@@ -831,6 +914,8 @@ spec:
               - type: PatchSet
                 patchSetName: in-env-namespace
               - type: PatchSet
+                patchSetName: wait-for-namespace
+              - type: PatchSet
                 patchSetName: env-labels
 
           - name: db-netpol-db
@@ -839,6 +924,11 @@ spec:
               kind: Object
               spec:
                 watch: true
+                references:
+                  - dependsOn:
+                      apiVersion: v1
+                      kind: Namespace
+                      name: NAMESPACE
                 providerConfigRef:
                   kind: ClusterProviderConfig
                   name: in-cluster
@@ -890,6 +980,8 @@ spec:
                       fmt: "%s-netpol-db"
               - type: PatchSet
                 patchSetName: in-env-namespace
+              - type: PatchSet
+                patchSetName: wait-for-namespace
               - type: PatchSet
                 patchSetName: env-labels
 
