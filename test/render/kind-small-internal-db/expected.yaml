@@ -1,0 +1,716 @@
+---
+apiVersion: platform.example.io/v1alpha1
+kind: AppEnvironment
+metadata:
+  labels:
+    platform.example.io/team: growth
+  name: ledger
+  namespace: team-growth
+spec:
+  crossplane:
+    resourceRefs:
+    - apiVersion: helm.m.crossplane.io/v1beta1
+      kind: Release
+      name: ledger-db
+    - apiVersion: kubernetes.m.crossplane.io/v1alpha1
+      kind: Object
+      name: ledger-db-credentials
+    - apiVersion: kubernetes.m.crossplane.io/v1alpha1
+      kind: Object
+      name: ledger-deployment
+    - apiVersion: kubernetes.m.crossplane.io/v1alpha1
+      kind: Object
+      name: ledger-limitrange
+    - apiVersion: kubernetes.m.crossplane.io/v1alpha1
+      kind: Object
+      name: ledger-namespace
+    - apiVersion: kubernetes.m.crossplane.io/v1alpha1
+      kind: Object
+      name: ledger-netpol-allow-dns
+    - apiVersion: kubernetes.m.crossplane.io/v1alpha1
+      kind: Object
+      name: ledger-netpol-allow-team
+    - apiVersion: kubernetes.m.crossplane.io/v1alpha1
+      kind: Object
+      name: ledger-netpol-app-to-db
+    - apiVersion: kubernetes.m.crossplane.io/v1alpha1
+      kind: Object
+      name: ledger-netpol-db
+    - apiVersion: kubernetes.m.crossplane.io/v1alpha1
+      kind: Object
+      name: ledger-netpol-default-deny
+    - apiVersion: kubernetes.m.crossplane.io/v1alpha1
+      kind: Object
+      name: ledger-quota
+    - apiVersion: kubernetes.m.crossplane.io/v1alpha1
+      kind: Object
+      name: ledger-service
+    - apiVersion: protection.crossplane.io/v1beta1
+      kind: Usage
+      name: ledger-db-uses-namespace
+  database: true
+  exposure: internal
+  image: ghcr.io/example/ledger:1.0.0
+  port: 9090
+  size: small
+status:
+  conditions:
+  - lastTransitionTime: "2024-01-01T00:00:00Z"
+    reason: WatchCircuitClosed
+    status: "True"
+    type: Responsive
+  - lastTransitionTime: "2024-01-01T00:00:00Z"
+    reason: ReconcileSuccess
+    status: "True"
+    type: Synced
+  - lastTransitionTime: "2024-01-01T00:00:00Z"
+    message: 'Unready resources: db-credentials, db-netpol-app-egress, db-netpol-db,
+      and 10 more'
+    reason: Creating
+    status: "False"
+    type: Ready
+---
+apiVersion: kubernetes.m.crossplane.io/v1alpha1
+kind: Object
+metadata:
+  annotations:
+    crossplane.io/composition-resource-name: db-credentials
+  labels:
+    crossplane.io/composite: ledger
+  name: ledger-db-credentials
+  namespace: team-growth
+  ownerReferences:
+  - apiVersion: platform.example.io/v1alpha1
+    blockOwnerDeletion: true
+    controller: true
+    kind: AppEnvironment
+    name: ledger
+    uid: 88ffbc10-8e15-5fee-85be-79c12a72cfd0
+spec:
+  forProvider:
+    manifest:
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        labels:
+          platform.example.io/environment: ledger
+          platform.example.io/team: growth
+        name: app-db
+        namespace: growth-ledger
+      type: Opaque
+  providerConfigRef:
+    kind: ClusterProviderConfig
+    name: in-cluster
+  references:
+  - patchesFrom:
+      apiVersion: v1
+      fieldPath: data.uri
+      kind: Secret
+      name: db-app
+      namespace: growth-ledger
+    toFieldPath: data.DATABASE_URL
+  - patchesFrom:
+      apiVersion: v1
+      fieldPath: data.host
+      kind: Secret
+      name: db-app
+      namespace: growth-ledger
+    toFieldPath: data.PGHOST
+  - patchesFrom:
+      apiVersion: v1
+      fieldPath: data.port
+      kind: Secret
+      name: db-app
+      namespace: growth-ledger
+    toFieldPath: data.PGPORT
+  - patchesFrom:
+      apiVersion: v1
+      fieldPath: data.dbname
+      kind: Secret
+      name: db-app
+      namespace: growth-ledger
+    toFieldPath: data.PGDATABASE
+  - patchesFrom:
+      apiVersion: v1
+      fieldPath: data.username
+      kind: Secret
+      name: db-app
+      namespace: growth-ledger
+    toFieldPath: data.PGUSER
+  - patchesFrom:
+      apiVersion: v1
+      fieldPath: data.password
+      kind: Secret
+      name: db-app
+      namespace: growth-ledger
+    toFieldPath: data.PGPASSWORD
+  watch: true
+---
+apiVersion: kubernetes.m.crossplane.io/v1alpha1
+kind: Object
+metadata:
+  annotations:
+    crossplane.io/composition-resource-name: db-netpol-app-egress
+  labels:
+    crossplane.io/composite: ledger
+  name: ledger-netpol-app-to-db
+  namespace: team-growth
+  ownerReferences:
+  - apiVersion: platform.example.io/v1alpha1
+    blockOwnerDeletion: true
+    controller: true
+    kind: AppEnvironment
+    name: ledger
+    uid: 88ffbc10-8e15-5fee-85be-79c12a72cfd0
+spec:
+  forProvider:
+    manifest:
+      apiVersion: networking.k8s.io/v1
+      kind: NetworkPolicy
+      metadata:
+        labels:
+          platform.example.io/environment: ledger
+          platform.example.io/team: growth
+        name: allow-app-to-db
+        namespace: growth-ledger
+      spec:
+        egress:
+        - ports:
+          - port: 5432
+            protocol: TCP
+          to:
+          - podSelector:
+              matchLabels:
+                cnpg.io/cluster: db
+        podSelector:
+          matchLabels:
+            app.kubernetes.io/name: app
+        policyTypes:
+        - Egress
+  providerConfigRef:
+    kind: ClusterProviderConfig
+    name: in-cluster
+  watch: true
+---
+apiVersion: kubernetes.m.crossplane.io/v1alpha1
+kind: Object
+metadata:
+  annotations:
+    crossplane.io/composition-resource-name: db-netpol-db
+  labels:
+    crossplane.io/composite: ledger
+  name: ledger-netpol-db
+  namespace: team-growth
+  ownerReferences:
+  - apiVersion: platform.example.io/v1alpha1
+    blockOwnerDeletion: true
+    controller: true
+    kind: AppEnvironment
+    name: ledger
+    uid: 88ffbc10-8e15-5fee-85be-79c12a72cfd0
+spec:
+  forProvider:
+    manifest:
+      apiVersion: networking.k8s.io/v1
+      kind: NetworkPolicy
+      metadata:
+        labels:
+          platform.example.io/environment: ledger
+          platform.example.io/team: growth
+        name: allow-db
+        namespace: growth-ledger
+      spec:
+        egress:
+        - ports:
+          - port: 443
+            protocol: TCP
+          - port: 6443
+            protocol: TCP
+        ingress:
+        - from:
+          - podSelector:
+              matchLabels:
+                app.kubernetes.io/name: app
+          ports:
+          - port: 5432
+            protocol: TCP
+        - from:
+          - namespaceSelector:
+              matchLabels:
+                kubernetes.io/metadata.name: cnpg-system
+          ports:
+          - port: 8000
+            protocol: TCP
+          - port: 5432
+            protocol: TCP
+        podSelector:
+          matchLabels:
+            cnpg.io/cluster: db
+        policyTypes:
+        - Ingress
+        - Egress
+  providerConfigRef:
+    kind: ClusterProviderConfig
+    name: in-cluster
+  watch: true
+---
+apiVersion: helm.m.crossplane.io/v1beta1
+kind: Release
+metadata:
+  annotations:
+    crossplane.io/composition-resource-name: db-release
+    crossplane.io/external-name: db
+  labels:
+    crossplane.io/composite: ledger
+  name: ledger-db
+  namespace: team-growth
+  ownerReferences:
+  - apiVersion: platform.example.io/v1alpha1
+    blockOwnerDeletion: true
+    controller: true
+    kind: AppEnvironment
+    name: ledger
+    uid: 88ffbc10-8e15-5fee-85be-79c12a72cfd0
+spec:
+  forProvider:
+    chart:
+      name: cluster
+      repository: https://cloudnative-pg.github.io/charts
+      version: 0.9.0
+    namespace: growth-ledger
+    values:
+      cluster:
+        enablePDB: false
+        enableSuperuserAccess: false
+        imageName: ghcr.io/cloudnative-pg/postgresql:18.6-minimal-trixie@sha256:64abc98a4387361afd6821a3a99f975763bbd87bbdde9449e75ad6002528a318
+        instances: 1
+        monitoring:
+          enabled: false
+        resources:
+          limits:
+            cpu: 500m
+            memory: 512Mi
+          requests:
+            cpu: 100m
+            memory: 256Mi
+        storage:
+          size: 1Gi
+      fullnameOverride: db
+      mode: standalone
+      type: postgresql
+      version:
+        postgresql: "18"
+  providerConfigRef:
+    kind: ClusterProviderConfig
+    name: in-cluster
+---
+apiVersion: protection.crossplane.io/v1beta1
+kind: Usage
+metadata:
+  annotations:
+    crossplane.io/composition-resource-name: db-usage
+  labels:
+    crossplane.io/composite: ledger
+  name: ledger-db-uses-namespace
+  namespace: team-growth
+  ownerReferences:
+  - apiVersion: platform.example.io/v1alpha1
+    blockOwnerDeletion: true
+    controller: true
+    kind: AppEnvironment
+    name: ledger
+    uid: 88ffbc10-8e15-5fee-85be-79c12a72cfd0
+spec:
+  by:
+    apiVersion: helm.m.crossplane.io/v1beta1
+    kind: Release
+    resourceRef:
+      name: ledger-db
+  of:
+    apiVersion: kubernetes.m.crossplane.io/v1alpha1
+    kind: Object
+    resourceRef:
+      name: ledger-namespace
+  replayDeletion: true
+---
+apiVersion: kubernetes.m.crossplane.io/v1alpha1
+kind: Object
+metadata:
+  annotations:
+    crossplane.io/composition-resource-name: deployment
+  labels:
+    crossplane.io/composite: ledger
+  name: ledger-deployment
+  namespace: team-growth
+  ownerReferences:
+  - apiVersion: platform.example.io/v1alpha1
+    blockOwnerDeletion: true
+    controller: true
+    kind: AppEnvironment
+    name: ledger
+    uid: 88ffbc10-8e15-5fee-85be-79c12a72cfd0
+spec:
+  forProvider:
+    manifest:
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        labels:
+          platform.example.io/environment: ledger
+          platform.example.io/team: growth
+        name: app
+        namespace: growth-ledger
+      spec:
+        replicas: 1
+        revisionHistoryLimit: 3
+        selector:
+          matchLabels:
+            app.kubernetes.io/name: app
+        template:
+          metadata:
+            labels:
+              app.kubernetes.io/name: app
+          spec:
+            automountServiceAccountToken: false
+            containers:
+            - env:
+              - name: PORT
+                value: "9090"
+              envFrom:
+              - secretRef:
+                  name: app-db
+                  optional: false
+              image: ghcr.io/example/ledger:1.0.0
+              imagePullPolicy: IfNotPresent
+              livenessProbe:
+                httpGet:
+                  path: /healthz
+                  port: http
+                periodSeconds: 10
+              name: app
+              ports:
+              - containerPort: 9090
+                name: http
+              readinessProbe:
+                failureThreshold: 2
+                httpGet:
+                  path: /readyz
+                  port: http
+                periodSeconds: 2
+              resources:
+                limits:
+                  cpu: 250m
+                  memory: 128Mi
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop:
+                  - ALL
+                readOnlyRootFilesystem: true
+            securityContext:
+              runAsNonRoot: true
+              seccompProfile:
+                type: RuntimeDefault
+  providerConfigRef:
+    kind: ClusterProviderConfig
+    name: in-cluster
+  readiness:
+    celQuery: object.?status.?conditions.orValue([]).exists(c, c.type == 'Available'
+      && c.status == 'True') && object.?status.?readyReplicas.orValue(0) == object.?spec.?replicas.orValue(1)
+      && object.?status.?updatedReplicas.orValue(0) == object.?spec.?replicas.orValue(1)
+    policy: DeriveFromCelQuery
+  watch: true
+---
+apiVersion: kubernetes.m.crossplane.io/v1alpha1
+kind: Object
+metadata:
+  annotations:
+    crossplane.io/composition-resource-name: limitrange
+  labels:
+    crossplane.io/composite: ledger
+  name: ledger-limitrange
+  namespace: team-growth
+  ownerReferences:
+  - apiVersion: platform.example.io/v1alpha1
+    blockOwnerDeletion: true
+    controller: true
+    kind: AppEnvironment
+    name: ledger
+    uid: 88ffbc10-8e15-5fee-85be-79c12a72cfd0
+spec:
+  forProvider:
+    manifest:
+      apiVersion: v1
+      kind: LimitRange
+      metadata:
+        labels:
+          platform.example.io/environment: ledger
+          platform.example.io/team: growth
+        name: env-defaults
+        namespace: growth-ledger
+      spec:
+        limits:
+        - default:
+            cpu: 500m
+            memory: 512Mi
+          defaultRequest:
+            cpu: 100m
+            memory: 128Mi
+          type: Container
+  providerConfigRef:
+    kind: ClusterProviderConfig
+    name: in-cluster
+  watch: true
+---
+apiVersion: kubernetes.m.crossplane.io/v1alpha1
+kind: Object
+metadata:
+  annotations:
+    crossplane.io/composition-resource-name: namespace
+  labels:
+    crossplane.io/composite: ledger
+  name: ledger-namespace
+  namespace: team-growth
+  ownerReferences:
+  - apiVersion: platform.example.io/v1alpha1
+    blockOwnerDeletion: true
+    controller: true
+    kind: AppEnvironment
+    name: ledger
+    uid: 88ffbc10-8e15-5fee-85be-79c12a72cfd0
+spec:
+  forProvider:
+    manifest:
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        labels:
+          app.kubernetes.io/managed-by: crossplane
+          platform.example.io/environment: ledger
+          platform.example.io/size: small
+          platform.example.io/team: growth
+          pod-security.kubernetes.io/enforce: baseline
+          pod-security.kubernetes.io/warn: restricted
+        name: growth-ledger
+  providerConfigRef:
+    kind: ClusterProviderConfig
+    name: in-cluster
+  watch: true
+---
+apiVersion: kubernetes.m.crossplane.io/v1alpha1
+kind: Object
+metadata:
+  annotations:
+    crossplane.io/composition-resource-name: netpol-allow-dns
+  labels:
+    crossplane.io/composite: ledger
+  name: ledger-netpol-allow-dns
+  namespace: team-growth
+  ownerReferences:
+  - apiVersion: platform.example.io/v1alpha1
+    blockOwnerDeletion: true
+    controller: true
+    kind: AppEnvironment
+    name: ledger
+    uid: 88ffbc10-8e15-5fee-85be-79c12a72cfd0
+spec:
+  forProvider:
+    manifest:
+      apiVersion: networking.k8s.io/v1
+      kind: NetworkPolicy
+      metadata:
+        labels:
+          platform.example.io/environment: ledger
+          platform.example.io/team: growth
+        name: allow-dns
+        namespace: growth-ledger
+      spec:
+        egress:
+        - ports:
+          - port: 53
+            protocol: UDP
+          - port: 53
+            protocol: TCP
+          to:
+          - namespaceSelector:
+              matchLabels:
+                kubernetes.io/metadata.name: kube-system
+            podSelector:
+              matchLabels:
+                k8s-app: kube-dns
+        podSelector: {}
+        policyTypes:
+        - Egress
+  providerConfigRef:
+    kind: ClusterProviderConfig
+    name: in-cluster
+  watch: true
+---
+apiVersion: kubernetes.m.crossplane.io/v1alpha1
+kind: Object
+metadata:
+  annotations:
+    crossplane.io/composition-resource-name: netpol-allow-team
+  labels:
+    crossplane.io/composite: ledger
+  name: ledger-netpol-allow-team
+  namespace: team-growth
+  ownerReferences:
+  - apiVersion: platform.example.io/v1alpha1
+    blockOwnerDeletion: true
+    controller: true
+    kind: AppEnvironment
+    name: ledger
+    uid: 88ffbc10-8e15-5fee-85be-79c12a72cfd0
+spec:
+  forProvider:
+    manifest:
+      apiVersion: networking.k8s.io/v1
+      kind: NetworkPolicy
+      metadata:
+        labels:
+          platform.example.io/environment: ledger
+          platform.example.io/team: growth
+        name: allow-same-team
+        namespace: growth-ledger
+      spec:
+        ingress:
+        - from:
+          - namespaceSelector:
+              matchLabels:
+                platform.example.io/team: growth
+          ports:
+          - port: 9090
+            protocol: TCP
+        podSelector:
+          matchLabels:
+            app.kubernetes.io/name: app
+        policyTypes:
+        - Ingress
+  providerConfigRef:
+    kind: ClusterProviderConfig
+    name: in-cluster
+  watch: true
+---
+apiVersion: kubernetes.m.crossplane.io/v1alpha1
+kind: Object
+metadata:
+  annotations:
+    crossplane.io/composition-resource-name: netpol-default-deny
+  labels:
+    crossplane.io/composite: ledger
+  name: ledger-netpol-default-deny
+  namespace: team-growth
+  ownerReferences:
+  - apiVersion: platform.example.io/v1alpha1
+    blockOwnerDeletion: true
+    controller: true
+    kind: AppEnvironment
+    name: ledger
+    uid: 88ffbc10-8e15-5fee-85be-79c12a72cfd0
+spec:
+  forProvider:
+    manifest:
+      apiVersion: networking.k8s.io/v1
+      kind: NetworkPolicy
+      metadata:
+        labels:
+          platform.example.io/environment: ledger
+          platform.example.io/team: growth
+        name: default-deny
+        namespace: growth-ledger
+      spec:
+        podSelector: {}
+        policyTypes:
+        - Ingress
+        - Egress
+  providerConfigRef:
+    kind: ClusterProviderConfig
+    name: in-cluster
+  watch: true
+---
+apiVersion: kubernetes.m.crossplane.io/v1alpha1
+kind: Object
+metadata:
+  annotations:
+    crossplane.io/composition-resource-name: quota
+  labels:
+    crossplane.io/composite: ledger
+  name: ledger-quota
+  namespace: team-growth
+  ownerReferences:
+  - apiVersion: platform.example.io/v1alpha1
+    blockOwnerDeletion: true
+    controller: true
+    kind: AppEnvironment
+    name: ledger
+    uid: 88ffbc10-8e15-5fee-85be-79c12a72cfd0
+spec:
+  forProvider:
+    manifest:
+      apiVersion: v1
+      kind: ResourceQuota
+      metadata:
+        labels:
+          platform.example.io/environment: ledger
+          platform.example.io/team: growth
+        name: env-quota
+        namespace: growth-ledger
+      spec:
+        hard:
+          limits.cpu: "2"
+          limits.memory: 2Gi
+          persistentvolumeclaims: "2"
+          pods: "10"
+          requests.cpu: "1"
+          requests.memory: 1Gi
+          requests.storage: 2Gi
+          services: "5"
+  providerConfigRef:
+    kind: ClusterProviderConfig
+    name: in-cluster
+  watch: true
+---
+apiVersion: kubernetes.m.crossplane.io/v1alpha1
+kind: Object
+metadata:
+  annotations:
+    crossplane.io/composition-resource-name: service
+  labels:
+    crossplane.io/composite: ledger
+  name: ledger-service
+  namespace: team-growth
+  ownerReferences:
+  - apiVersion: platform.example.io/v1alpha1
+    blockOwnerDeletion: true
+    controller: true
+    kind: AppEnvironment
+    name: ledger
+    uid: 88ffbc10-8e15-5fee-85be-79c12a72cfd0
+spec:
+  forProvider:
+    manifest:
+      apiVersion: v1
+      kind: Service
+      metadata:
+        labels:
+          platform.example.io/environment: ledger
+          platform.example.io/team: growth
+        name: app
+        namespace: growth-ledger
+      spec:
+        ports:
+        - name: http
+          port: 80
+          protocol: TCP
+          targetPort: http
+        selector:
+          app.kubernetes.io/name: app
+        type: ClusterIP
+  providerConfigRef:
+    kind: ClusterProviderConfig
+    name: in-cluster
+  watch: true

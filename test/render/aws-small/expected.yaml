@@ -1,0 +1,126 @@
+---
+apiVersion: platform.example.io/v1alpha1
+kind: AppEnvironment
+metadata:
+  labels:
+    platform.example.io/team: payments
+  name: preview
+  namespace: team-payments
+spec:
+  crossplane:
+    resourceRefs:
+    - apiVersion: s3.aws.m.upbound.io/v1beta1
+      kind: BucketPublicAccessBlock
+      name: preview-assets-public-access-block
+    - apiVersion: s3.aws.m.upbound.io/v1beta1
+      kind: BucketServerSideEncryptionConfiguration
+      name: preview-assets-encryption
+    - apiVersion: s3.aws.m.upbound.io/v1beta1
+      kind: Bucket
+      name: payments-preview-assets
+  database: false
+  exposure: internal
+  image: env-probe:e2e
+  port: 8080
+  size: small
+status:
+  conditions:
+  - lastTransitionTime: "2024-01-01T00:00:00Z"
+    reason: WatchCircuitClosed
+    status: "True"
+    type: Responsive
+  - lastTransitionTime: "2024-01-01T00:00:00Z"
+    reason: ReconcileSuccess
+    status: "True"
+    type: Synced
+  - lastTransitionTime: "2024-01-01T00:00:00Z"
+    message: 'Unready resources: assets-bucket, assets-bucket-encryption, and assets-bucket-public-access-block'
+    reason: Creating
+    status: "False"
+    type: Ready
+---
+apiVersion: s3.aws.m.upbound.io/v1beta1
+kind: Bucket
+metadata:
+  annotations:
+    crossplane.io/composition-resource-name: assets-bucket
+  labels:
+    crossplane.io/composite: preview
+  name: payments-preview-assets
+  namespace: team-payments
+  ownerReferences:
+  - apiVersion: platform.example.io/v1alpha1
+    blockOwnerDeletion: true
+    controller: true
+    kind: AppEnvironment
+    name: preview
+    uid: 17b7980b-2571-5c14-8ca1-1521b9fc385c
+spec:
+  forProvider:
+    forceDestroy: false
+    region: eu-central-1
+    tags:
+      environment: preview
+      managed-by: crossplane
+      team: payments
+  providerConfigRef:
+    kind: ClusterProviderConfig
+    name: aws
+---
+apiVersion: s3.aws.m.upbound.io/v1beta1
+kind: BucketServerSideEncryptionConfiguration
+metadata:
+  annotations:
+    crossplane.io/composition-resource-name: assets-bucket-encryption
+  labels:
+    crossplane.io/composite: preview
+  name: preview-assets-encryption
+  namespace: team-payments
+  ownerReferences:
+  - apiVersion: platform.example.io/v1alpha1
+    blockOwnerDeletion: true
+    controller: true
+    kind: AppEnvironment
+    name: preview
+    uid: 17b7980b-2571-5c14-8ca1-1521b9fc385c
+spec:
+  forProvider:
+    bucketSelector:
+      matchControllerRef: true
+    region: eu-central-1
+    rule:
+    - applyServerSideEncryptionByDefault:
+        sseAlgorithm: aws:kms
+      bucketKeyEnabled: true
+  providerConfigRef:
+    kind: ClusterProviderConfig
+    name: aws
+---
+apiVersion: s3.aws.m.upbound.io/v1beta1
+kind: BucketPublicAccessBlock
+metadata:
+  annotations:
+    crossplane.io/composition-resource-name: assets-bucket-public-access-block
+  labels:
+    crossplane.io/composite: preview
+  name: preview-assets-public-access-block
+  namespace: team-payments
+  ownerReferences:
+  - apiVersion: platform.example.io/v1alpha1
+    blockOwnerDeletion: true
+    controller: true
+    kind: AppEnvironment
+    name: preview
+    uid: 17b7980b-2571-5c14-8ca1-1521b9fc385c
+spec:
+  forProvider:
+    blockPublicAcls: true
+    blockPublicPolicy: true
+    bucketSelector:
+      matchControllerRef: true
+    ignorePublicAcls: true
+    region: eu-central-1
+    restrictPublicBuckets: true
+  providerConfigRef:
+    kind: ClusterProviderConfig
+    name: aws

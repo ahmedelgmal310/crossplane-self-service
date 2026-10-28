@@ -1,0 +1,814 @@
+---
+apiVersion: platform.example.io/v1alpha1
+kind: AppEnvironment
+metadata:
+  labels:
+    platform.example.io/team: payments
+  name: checkout-api
+  namespace: team-payments
+spec:
+  crossplane:
+    resourceRefs:
+    - apiVersion: helm.m.crossplane.io/v1beta1
+      kind: Release
+      name: checkout-api-db
+    - apiVersion: kubernetes.m.crossplane.io/v1alpha1
+      kind: Object
+      name: checkout-api-db-credentials
+    - apiVersion: kubernetes.m.crossplane.io/v1alpha1
+      kind: Object
+      name: checkout-api-deployment
+    - apiVersion: kubernetes.m.crossplane.io/v1alpha1
+      kind: Object
+      name: checkout-api-ingress
+    - apiVersion: kubernetes.m.crossplane.io/v1alpha1
+      kind: Object
+      name: checkout-api-limitrange
+    - apiVersion: kubernetes.m.crossplane.io/v1alpha1
+      kind: Object
+      name: checkout-api-namespace
+    - apiVersion: kubernetes.m.crossplane.io/v1alpha1
+      kind: Object
+      name: checkout-api-netpol-allow-dns
+    - apiVersion: kubernetes.m.crossplane.io/v1alpha1
+      kind: Object
+      name: checkout-api-netpol-allow-team
+    - apiVersion: kubernetes.m.crossplane.io/v1alpha1
+      kind: Object
+      name: checkout-api-netpol-app-to-db
+    - apiVersion: kubernetes.m.crossplane.io/v1alpha1
+      kind: Object
+      name: checkout-api-netpol-db
+    - apiVersion: kubernetes.m.crossplane.io/v1alpha1
+      kind: Object
+      name: checkout-api-netpol-default-deny
+    - apiVersion: kubernetes.m.crossplane.io/v1alpha1
+      kind: Object
+      name: checkout-api-netpol-ingress-controller
+    - apiVersion: kubernetes.m.crossplane.io/v1alpha1
+      kind: Object
+      name: checkout-api-quota
+    - apiVersion: kubernetes.m.crossplane.io/v1alpha1
+      kind: Object
+      name: checkout-api-service
+    - apiVersion: protection.crossplane.io/v1beta1
+      kind: Usage
+      name: checkout-api-db-uses-namespace
+  database: true
+  exposure: public
+  hostname: checkout.payments.apps.example.test
+  image: env-probe:e2e
+  port: 8080
+  size: medium
+status:
+  conditions:
+  - lastTransitionTime: "2024-01-01T00:00:00Z"
+    reason: WatchCircuitClosed
+    status: "True"
+    type: Responsive
+  - lastTransitionTime: "2024-01-01T00:00:00Z"
+    reason: ReconcileSuccess
+    status: "True"
+    type: Synced
+  - lastTransitionTime: "2024-01-01T00:00:00Z"
+    message: 'Unready resources: db-credentials, db-netpol-app-egress, db-netpol-db,
+      and 12 more'
+    reason: Creating
+    status: "False"
+    type: Ready
+---
+apiVersion: kubernetes.m.crossplane.io/v1alpha1
+kind: Object
+metadata:
+  annotations:
+    crossplane.io/composition-resource-name: db-credentials
+  labels:
+    crossplane.io/composite: checkout-api
+  name: checkout-api-db-credentials
+  namespace: team-payments
+  ownerReferences:
+  - apiVersion: platform.example.io/v1alpha1
+    blockOwnerDeletion: true
+    controller: true
+    kind: AppEnvironment
+    name: checkout-api
+    uid: 412c0f1a-0537-5291-b0a8-0bdff12d3a15
+spec:
+  forProvider:
+    manifest:
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        labels:
+          platform.example.io/environment: checkout-api
+          platform.example.io/team: payments
+        name: app-db
+        namespace: payments-checkout-api
+      type: Opaque
+  providerConfigRef:
+    kind: ClusterProviderConfig
+    name: in-cluster
+  references:
+  - patchesFrom:
+      apiVersion: v1
+      fieldPath: data.uri
+      kind: Secret
+      name: db-app
+      namespace: payments-checkout-api
+    toFieldPath: data.DATABASE_URL
+  - patchesFrom:
+      apiVersion: v1
+      fieldPath: data.host
+      kind: Secret
+      name: db-app
+      namespace: payments-checkout-api
+    toFieldPath: data.PGHOST
+  - patchesFrom:
+      apiVersion: v1
+      fieldPath: data.port
+      kind: Secret
+      name: db-app
+      namespace: payments-checkout-api
+    toFieldPath: data.PGPORT
+  - patchesFrom:
+      apiVersion: v1
+      fieldPath: data.dbname
+      kind: Secret
+      name: db-app
+      namespace: payments-checkout-api
+    toFieldPath: data.PGDATABASE
+  - patchesFrom:
+      apiVersion: v1
+      fieldPath: data.username
+      kind: Secret
+      name: db-app
+      namespace: payments-checkout-api
+    toFieldPath: data.PGUSER
+  - patchesFrom:
+      apiVersion: v1
+      fieldPath: data.password
+      kind: Secret
+      name: db-app
+      namespace: payments-checkout-api
+    toFieldPath: data.PGPASSWORD
+  watch: true
+---
+apiVersion: kubernetes.m.crossplane.io/v1alpha1
+kind: Object
+metadata:
+  annotations:
+    crossplane.io/composition-resource-name: db-netpol-app-egress
+  labels:
+    crossplane.io/composite: checkout-api
+  name: checkout-api-netpol-app-to-db
+  namespace: team-payments
+  ownerReferences:
+  - apiVersion: platform.example.io/v1alpha1
+    blockOwnerDeletion: true
+    controller: true
+    kind: AppEnvironment
+    name: checkout-api
+    uid: 412c0f1a-0537-5291-b0a8-0bdff12d3a15
+spec:
+  forProvider:
+    manifest:
+      apiVersion: networking.k8s.io/v1
+      kind: NetworkPolicy
+      metadata:
+        labels:
+          platform.example.io/environment: checkout-api
+          platform.example.io/team: payments
+        name: allow-app-to-db
+        namespace: payments-checkout-api
+      spec:
+        egress:
+        - ports:
+          - port: 5432
+            protocol: TCP
+          to:
+          - podSelector:
+              matchLabels:
+                cnpg.io/cluster: db
+        podSelector:
+          matchLabels:
+            app.kubernetes.io/name: app
+        policyTypes:
+        - Egress
+  providerConfigRef:
+    kind: ClusterProviderConfig
+    name: in-cluster
+  watch: true
+---
+apiVersion: kubernetes.m.crossplane.io/v1alpha1
+kind: Object
+metadata:
+  annotations:
+    crossplane.io/composition-resource-name: db-netpol-db
+  labels:
+    crossplane.io/composite: checkout-api
+  name: checkout-api-netpol-db
+  namespace: team-payments
+  ownerReferences:
+  - apiVersion: platform.example.io/v1alpha1
+    blockOwnerDeletion: true
+    controller: true
+    kind: AppEnvironment
+    name: checkout-api
+    uid: 412c0f1a-0537-5291-b0a8-0bdff12d3a15
+spec:
+  forProvider:
+    manifest:
+      apiVersion: networking.k8s.io/v1
+      kind: NetworkPolicy
+      metadata:
+        labels:
+          platform.example.io/environment: checkout-api
+          platform.example.io/team: payments
+        name: allow-db
+        namespace: payments-checkout-api
+      spec:
+        egress:
+        - ports:
+          - port: 443
+            protocol: TCP
+          - port: 6443
+            protocol: TCP
+        ingress:
+        - from:
+          - podSelector:
+              matchLabels:
+                app.kubernetes.io/name: app
+          ports:
+          - port: 5432
+            protocol: TCP
+        - from:
+          - namespaceSelector:
+              matchLabels:
+                kubernetes.io/metadata.name: cnpg-system
+          ports:
+          - port: 8000
+            protocol: TCP
+          - port: 5432
+            protocol: TCP
+        podSelector:
+          matchLabels:
+            cnpg.io/cluster: db
+        policyTypes:
+        - Ingress
+        - Egress
+  providerConfigRef:
+    kind: ClusterProviderConfig
+    name: in-cluster
+  watch: true
+---
+apiVersion: helm.m.crossplane.io/v1beta1
+kind: Release
+metadata:
+  annotations:
+    crossplane.io/composition-resource-name: db-release
+    crossplane.io/external-name: db
+  labels:
+    crossplane.io/composite: checkout-api
+  name: checkout-api-db
+  namespace: team-payments
+  ownerReferences:
+  - apiVersion: platform.example.io/v1alpha1
+    blockOwnerDeletion: true
+    controller: true
+    kind: AppEnvironment
+    name: checkout-api
+    uid: 412c0f1a-0537-5291-b0a8-0bdff12d3a15
+spec:
+  forProvider:
+    chart:
+      name: cluster
+      repository: https://cloudnative-pg.github.io/charts
+      version: 0.9.0
+    namespace: payments-checkout-api
+    values:
+      cluster:
+        enablePDB: false
+        enableSuperuserAccess: false
+        imageName: ghcr.io/cloudnative-pg/postgresql:18.6-minimal-trixie@sha256:64abc98a4387361afd6821a3a99f975763bbd87bbdde9449e75ad6002528a318
+        instances: 1
+        monitoring:
+          enabled: false
+        resources:
+          limits:
+            cpu: "1"
+            memory: 1Gi
+          requests:
+            cpu: 250m
+            memory: 512Mi
+        storage:
+          size: 5Gi
+      fullnameOverride: db
+      mode: standalone
+      type: postgresql
+      version:
+        postgresql: "18"
+  providerConfigRef:
+    kind: ClusterProviderConfig
+    name: in-cluster
+---
+apiVersion: protection.crossplane.io/v1beta1
+kind: Usage
+metadata:
+  annotations:
+    crossplane.io/composition-resource-name: db-usage
+  labels:
+    crossplane.io/composite: checkout-api
+  name: checkout-api-db-uses-namespace
+  namespace: team-payments
+  ownerReferences:
+  - apiVersion: platform.example.io/v1alpha1
+    blockOwnerDeletion: true
+    controller: true
+    kind: AppEnvironment
+    name: checkout-api
+    uid: 412c0f1a-0537-5291-b0a8-0bdff12d3a15
+spec:
+  by:
+    apiVersion: helm.m.crossplane.io/v1beta1
+    kind: Release
+    resourceRef:
+      name: checkout-api-db
+  of:
+    apiVersion: kubernetes.m.crossplane.io/v1alpha1
+    kind: Object
+    resourceRef:
+      name: checkout-api-namespace
+  replayDeletion: true
+---
+apiVersion: kubernetes.m.crossplane.io/v1alpha1
+kind: Object
+metadata:
+  annotations:
+    crossplane.io/composition-resource-name: deployment
+  labels:
+    crossplane.io/composite: checkout-api
+  name: checkout-api-deployment
+  namespace: team-payments
+  ownerReferences:
+  - apiVersion: platform.example.io/v1alpha1
+    blockOwnerDeletion: true
+    controller: true
+    kind: AppEnvironment
+    name: checkout-api
+    uid: 412c0f1a-0537-5291-b0a8-0bdff12d3a15
+spec:
+  forProvider:
+    manifest:
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        labels:
+          platform.example.io/environment: checkout-api
+          platform.example.io/team: payments
+        name: app
+        namespace: payments-checkout-api
+      spec:
+        replicas: 2
+        revisionHistoryLimit: 3
+        selector:
+          matchLabels:
+            app.kubernetes.io/name: app
+        template:
+          metadata:
+            labels:
+              app.kubernetes.io/name: app
+          spec:
+            automountServiceAccountToken: false
+            containers:
+            - env:
+              - name: PORT
+                value: "8080"
+              envFrom:
+              - secretRef:
+                  name: app-db
+                  optional: false
+              image: env-probe:e2e
+              imagePullPolicy: IfNotPresent
+              livenessProbe:
+                httpGet:
+                  path: /healthz
+                  port: http
+                periodSeconds: 10
+              name: app
+              ports:
+              - containerPort: 8080
+                name: http
+              readinessProbe:
+                failureThreshold: 2
+                httpGet:
+                  path: /readyz
+                  port: http
+                periodSeconds: 2
+              resources:
+                limits:
+                  cpu: 250m
+                  memory: 128Mi
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop:
+                  - ALL
+                readOnlyRootFilesystem: true
+            securityContext:
+              runAsNonRoot: true
+              seccompProfile:
+                type: RuntimeDefault
+  providerConfigRef:
+    kind: ClusterProviderConfig
+    name: in-cluster
+  readiness:
+    celQuery: object.?status.?conditions.orValue([]).exists(c, c.type == 'Available'
+      && c.status == 'True') && object.?status.?readyReplicas.orValue(0) == object.?spec.?replicas.orValue(1)
+      && object.?status.?updatedReplicas.orValue(0) == object.?spec.?replicas.orValue(1)
+    policy: DeriveFromCelQuery
+  watch: true
+---
+apiVersion: kubernetes.m.crossplane.io/v1alpha1
+kind: Object
+metadata:
+  annotations:
+    crossplane.io/composition-resource-name: limitrange
+  labels:
+    crossplane.io/composite: checkout-api
+  name: checkout-api-limitrange
+  namespace: team-payments
+  ownerReferences:
+  - apiVersion: platform.example.io/v1alpha1
+    blockOwnerDeletion: true
+    controller: true
+    kind: AppEnvironment
+    name: checkout-api
+    uid: 412c0f1a-0537-5291-b0a8-0bdff12d3a15
+spec:
+  forProvider:
+    manifest:
+      apiVersion: v1
+      kind: LimitRange
+      metadata:
+        labels:
+          platform.example.io/environment: checkout-api
+          platform.example.io/team: payments
+        name: env-defaults
+        namespace: payments-checkout-api
+      spec:
+        limits:
+        - default:
+            cpu: 500m
+            memory: 512Mi
+          defaultRequest:
+            cpu: 100m
+            memory: 128Mi
+          type: Container
+  providerConfigRef:
+    kind: ClusterProviderConfig
+    name: in-cluster
+  watch: true
+---
+apiVersion: kubernetes.m.crossplane.io/v1alpha1
+kind: Object
+metadata:
+  annotations:
+    crossplane.io/composition-resource-name: namespace
+  labels:
+    crossplane.io/composite: checkout-api
+  name: checkout-api-namespace
+  namespace: team-payments
+  ownerReferences:
+  - apiVersion: platform.example.io/v1alpha1
+    blockOwnerDeletion: true
+    controller: true
+    kind: AppEnvironment
+    name: checkout-api
+    uid: 412c0f1a-0537-5291-b0a8-0bdff12d3a15
+spec:
+  forProvider:
+    manifest:
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        labels:
+          app.kubernetes.io/managed-by: crossplane
+          platform.example.io/environment: checkout-api
+          platform.example.io/size: medium
+          platform.example.io/team: payments
+          pod-security.kubernetes.io/enforce: baseline
+          pod-security.kubernetes.io/warn: restricted
+        name: payments-checkout-api
+  providerConfigRef:
+    kind: ClusterProviderConfig
+    name: in-cluster
+  watch: true
+---
+apiVersion: kubernetes.m.crossplane.io/v1alpha1
+kind: Object
+metadata:
+  annotations:
+    crossplane.io/composition-resource-name: netpol-allow-dns
+  labels:
+    crossplane.io/composite: checkout-api
+  name: checkout-api-netpol-allow-dns
+  namespace: team-payments
+  ownerReferences:
+  - apiVersion: platform.example.io/v1alpha1
+    blockOwnerDeletion: true
+    controller: true
+    kind: AppEnvironment
+    name: checkout-api
+    uid: 412c0f1a-0537-5291-b0a8-0bdff12d3a15
+spec:
+  forProvider:
+    manifest:
+      apiVersion: networking.k8s.io/v1
+      kind: NetworkPolicy
+      metadata:
+        labels:
+          platform.example.io/environment: checkout-api
+          platform.example.io/team: payments
+        name: allow-dns
+        namespace: payments-checkout-api
+      spec:
+        egress:
+        - ports:
+          - port: 53
+            protocol: UDP
+          - port: 53
+            protocol: TCP
+          to:
+          - namespaceSelector:
+              matchLabels:
+                kubernetes.io/metadata.name: kube-system
+            podSelector:
+              matchLabels:
+                k8s-app: kube-dns
+        podSelector: {}
+        policyTypes:
+        - Egress
+  providerConfigRef:
+    kind: ClusterProviderConfig
+    name: in-cluster
+  watch: true
+---
+apiVersion: kubernetes.m.crossplane.io/v1alpha1
+kind: Object
+metadata:
+  annotations:
+    crossplane.io/composition-resource-name: netpol-allow-team
+  labels:
+    crossplane.io/composite: checkout-api
+  name: checkout-api-netpol-allow-team
+  namespace: team-payments
+  ownerReferences:
+  - apiVersion: platform.example.io/v1alpha1
+    blockOwnerDeletion: true
+    controller: true
+    kind: AppEnvironment
+    name: checkout-api
+    uid: 412c0f1a-0537-5291-b0a8-0bdff12d3a15
+spec:
+  forProvider:
+    manifest:
+      apiVersion: networking.k8s.io/v1
+      kind: NetworkPolicy
+      metadata:
+        labels:
+          platform.example.io/environment: checkout-api
+          platform.example.io/team: payments
+        name: allow-same-team
+        namespace: payments-checkout-api
+      spec:
+        ingress:
+        - from:
+          - namespaceSelector:
+              matchLabels:
+                platform.example.io/team: payments
+          ports:
+          - port: 8080
+            protocol: TCP
+        podSelector:
+          matchLabels:
+            app.kubernetes.io/name: app
+        policyTypes:
+        - Ingress
+  providerConfigRef:
+    kind: ClusterProviderConfig
+    name: in-cluster
+  watch: true
+---
+apiVersion: kubernetes.m.crossplane.io/v1alpha1
+kind: Object
+metadata:
+  annotations:
+    crossplane.io/composition-resource-name: netpol-default-deny
+  labels:
+    crossplane.io/composite: checkout-api
+  name: checkout-api-netpol-default-deny
+  namespace: team-payments
+  ownerReferences:
+  - apiVersion: platform.example.io/v1alpha1
+    blockOwnerDeletion: true
+    controller: true
+    kind: AppEnvironment
+    name: checkout-api
+    uid: 412c0f1a-0537-5291-b0a8-0bdff12d3a15
+spec:
+  forProvider:
+    manifest:
+      apiVersion: networking.k8s.io/v1
+      kind: NetworkPolicy
+      metadata:
+        labels:
+          platform.example.io/environment: checkout-api
+          platform.example.io/team: payments
+        name: default-deny
+        namespace: payments-checkout-api
+      spec:
+        podSelector: {}
+        policyTypes:
+        - Ingress
+        - Egress
+  providerConfigRef:
+    kind: ClusterProviderConfig
+    name: in-cluster
+  watch: true
+---
+apiVersion: kubernetes.m.crossplane.io/v1alpha1
+kind: Object
+metadata:
+  annotations:
+    crossplane.io/composition-resource-name: public-ingress
+  labels:
+    crossplane.io/composite: checkout-api
+  name: checkout-api-ingress
+  namespace: team-payments
+  ownerReferences:
+  - apiVersion: platform.example.io/v1alpha1
+    blockOwnerDeletion: true
+    controller: true
+    kind: AppEnvironment
+    name: checkout-api
+    uid: 412c0f1a-0537-5291-b0a8-0bdff12d3a15
+spec:
+  forProvider:
+    manifest:
+      apiVersion: networking.k8s.io/v1
+      kind: Ingress
+      metadata:
+        labels:
+          platform.example.io/environment: checkout-api
+          platform.example.io/team: payments
+        name: app
+        namespace: payments-checkout-api
+      spec:
+        ingressClassName: public
+        rules:
+        - host: checkout.payments.apps.example.test
+          http:
+            paths:
+            - backend:
+                service:
+                  name: app
+                  port:
+                    name: http
+              path: /
+              pathType: Prefix
+  providerConfigRef:
+    kind: ClusterProviderConfig
+    name: in-cluster
+  watch: true
+---
+apiVersion: kubernetes.m.crossplane.io/v1alpha1
+kind: Object
+metadata:
+  annotations:
+    crossplane.io/composition-resource-name: public-netpol-ingress-controller
+  labels:
+    crossplane.io/composite: checkout-api
+  name: checkout-api-netpol-ingress-controller
+  namespace: team-payments
+  ownerReferences:
+  - apiVersion: platform.example.io/v1alpha1
+    blockOwnerDeletion: true
+    controller: true
+    kind: AppEnvironment
+    name: checkout-api
+    uid: 412c0f1a-0537-5291-b0a8-0bdff12d3a15
+spec:
+  forProvider:
+    manifest:
+      apiVersion: networking.k8s.io/v1
+      kind: NetworkPolicy
+      metadata:
+        labels:
+          platform.example.io/environment: checkout-api
+          platform.example.io/team: payments
+        name: allow-ingress-controller
+        namespace: payments-checkout-api
+      spec:
+        ingress:
+        - from:
+          - namespaceSelector:
+              matchLabels:
+                kubernetes.io/metadata.name: ingress-system
+          ports:
+          - port: 8080
+            protocol: TCP
+        podSelector:
+          matchLabels:
+            app.kubernetes.io/name: app
+        policyTypes:
+        - Ingress
+  providerConfigRef:
+    kind: ClusterProviderConfig
+    name: in-cluster
+  watch: true
+---
+apiVersion: kubernetes.m.crossplane.io/v1alpha1
+kind: Object
+metadata:
+  annotations:
+    crossplane.io/composition-resource-name: quota
+  labels:
+    crossplane.io/composite: checkout-api
+  name: checkout-api-quota
+  namespace: team-payments
+  ownerReferences:
+  - apiVersion: platform.example.io/v1alpha1
+    blockOwnerDeletion: true
+    controller: true
+    kind: AppEnvironment
+    name: checkout-api
+    uid: 412c0f1a-0537-5291-b0a8-0bdff12d3a15
+spec:
+  forProvider:
+    manifest:
+      apiVersion: v1
+      kind: ResourceQuota
+      metadata:
+        labels:
+          platform.example.io/environment: checkout-api
+          platform.example.io/team: payments
+        name: env-quota
+        namespace: payments-checkout-api
+      spec:
+        hard:
+          limits.cpu: "4"
+          limits.memory: 8Gi
+          persistentvolumeclaims: "4"
+          pods: "20"
+          requests.cpu: "2"
+          requests.memory: 4Gi
+          requests.storage: 10Gi
+          services: "10"
+  providerConfigRef:
+    kind: ClusterProviderConfig
+    name: in-cluster
+  watch: true
+---
+apiVersion: kubernetes.m.crossplane.io/v1alpha1
+kind: Object
+metadata:
+  annotations:
+    crossplane.io/composition-resource-name: service
+  labels:
+    crossplane.io/composite: checkout-api
+  name: checkout-api-service
+  namespace: team-payments
+  ownerReferences:
+  - apiVersion: platform.example.io/v1alpha1
+    blockOwnerDeletion: true
+    controller: true
+    kind: AppEnvironment
+    name: checkout-api
+    uid: 412c0f1a-0537-5291-b0a8-0bdff12d3a15
+spec:
+  forProvider:
+    manifest:
+      apiVersion: v1
+      kind: Service
+      metadata:
+        labels:
+          platform.example.io/environment: checkout-api
+          platform.example.io/team: payments
+        name: app
+        namespace: payments-checkout-api
+      spec:
+        ports:
+        - name: http
+          port: 80
+          protocol: TCP
+          targetPort: http
+        selector:
+          app.kubernetes.io/name: app
+        type: ClusterIP
+  providerConfigRef:
+    kind: ClusterProviderConfig
+    name: in-cluster
+  watch: true

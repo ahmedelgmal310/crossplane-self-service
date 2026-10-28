@@ -1,0 +1,175 @@
+---
+apiVersion: platform.example.io/v1alpha1
+kind: AppEnvironment
+metadata:
+  labels:
+    platform.example.io/team: payments
+  name: checkout-api
+  namespace: team-payments
+spec:
+  crossplane:
+    resourceRefs:
+    - apiVersion: rds.aws.m.upbound.io/v1beta1
+      kind: Instance
+      name: checkout-api-db
+    - apiVersion: s3.aws.m.upbound.io/v1beta1
+      kind: BucketPublicAccessBlock
+      name: checkout-api-assets-public-access-block
+    - apiVersion: s3.aws.m.upbound.io/v1beta1
+      kind: BucketServerSideEncryptionConfiguration
+      name: checkout-api-assets-encryption
+    - apiVersion: s3.aws.m.upbound.io/v1beta1
+      kind: Bucket
+      name: payments-checkout-api-assets
+  database: true
+  exposure: public
+  hostname: checkout.payments.apps.example.test
+  image: env-probe:e2e
+  port: 8080
+  size: medium
+status:
+  conditions:
+  - lastTransitionTime: "2024-01-01T00:00:00Z"
+    reason: WatchCircuitClosed
+    status: "True"
+    type: Responsive
+  - lastTransitionTime: "2024-01-01T00:00:00Z"
+    reason: ReconcileSuccess
+    status: "True"
+    type: Synced
+  - lastTransitionTime: "2024-01-01T00:00:00Z"
+    message: 'Unready resources: assets-bucket, assets-bucket-encryption, assets-bucket-public-access-block,
+      and 1 more'
+    reason: Creating
+    status: "False"
+    type: Ready
+---
+apiVersion: s3.aws.m.upbound.io/v1beta1
+kind: Bucket
+metadata:
+  annotations:
+    crossplane.io/composition-resource-name: assets-bucket
+  labels:
+    crossplane.io/composite: checkout-api
+  name: payments-checkout-api-assets
+  namespace: team-payments
+  ownerReferences:
+  - apiVersion: platform.example.io/v1alpha1
+    blockOwnerDeletion: true
+    controller: true
+    kind: AppEnvironment
+    name: checkout-api
+    uid: 412c0f1a-0537-5291-b0a8-0bdff12d3a15
+spec:
+  forProvider:
+    forceDestroy: false
+    region: eu-central-1
+    tags:
+      environment: checkout-api
+      managed-by: crossplane
+      team: payments
+  providerConfigRef:
+    kind: ClusterProviderConfig
+    name: aws
+---
+apiVersion: s3.aws.m.upbound.io/v1beta1
+kind: BucketServerSideEncryptionConfiguration
+metadata:
+  annotations:
+    crossplane.io/composition-resource-name: assets-bucket-encryption
+  labels:
+    crossplane.io/composite: checkout-api
+  name: checkout-api-assets-encryption
+  namespace: team-payments
+  ownerReferences:
+  - apiVersion: platform.example.io/v1alpha1
+    blockOwnerDeletion: true
+    controller: true
+    kind: AppEnvironment
+    name: checkout-api
+    uid: 412c0f1a-0537-5291-b0a8-0bdff12d3a15
+spec:
+  forProvider:
+    bucketSelector:
+      matchControllerRef: true
+    region: eu-central-1
+    rule:
+    - applyServerSideEncryptionByDefault:
+        sseAlgorithm: aws:kms
+      bucketKeyEnabled: true
+  providerConfigRef:
+    kind: ClusterProviderConfig
+    name: aws
+---
+apiVersion: s3.aws.m.upbound.io/v1beta1
+kind: BucketPublicAccessBlock
+metadata:
+  annotations:
+    crossplane.io/composition-resource-name: assets-bucket-public-access-block
+  labels:
+    crossplane.io/composite: checkout-api
+  name: checkout-api-assets-public-access-block
+  namespace: team-payments
+  ownerReferences:
+  - apiVersion: platform.example.io/v1alpha1
+    blockOwnerDeletion: true
+    controller: true
+    kind: AppEnvironment
+    name: checkout-api
+    uid: 412c0f1a-0537-5291-b0a8-0bdff12d3a15
+spec:
+  forProvider:
+    blockPublicAcls: true
+    blockPublicPolicy: true
+    bucketSelector:
+      matchControllerRef: true
+    ignorePublicAcls: true
+    region: eu-central-1
+    restrictPublicBuckets: true
+  providerConfigRef:
+    kind: ClusterProviderConfig
+    name: aws
+---
+apiVersion: rds.aws.m.upbound.io/v1beta1
+kind: Instance
+metadata:
+  annotations:
+    crossplane.io/composition-resource-name: db-instance
+  labels:
+    crossplane.io/composite: checkout-api
+  name: checkout-api-db
+  namespace: team-payments
+  ownerReferences:
+  - apiVersion: platform.example.io/v1alpha1
+    blockOwnerDeletion: true
+    controller: true
+    kind: AppEnvironment
+    name: checkout-api
+    uid: 412c0f1a-0537-5291-b0a8-0bdff12d3a15
+spec:
+  forProvider:
+    allocatedStorage: 50
+    applyImmediately: true
+    autoGeneratePassword: true
+    backupRetentionPeriod: 7
+    dbName: app
+    dbSubnetGroupName: platform-private
+    engine: postgres
+    engineVersion: "17"
+    finalSnapshotIdentifier: checkout-api-final
+    instanceClass: db.t4g.medium
+    multiAz: true
+    passwordSecretRef:
+      key: password
+      name: checkout-api-db-password
+    publiclyAccessible: false
+    region: eu-central-1
+    skipFinalSnapshot: false
+    storageEncrypted: true
+    storageType: gp3
+    username: app
+  providerConfigRef:
+    kind: ClusterProviderConfig
+    name: aws
+  writeConnectionSecretToRef:
+    name: checkout-api-db-connection

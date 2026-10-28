@@ -22,6 +22,13 @@ import (
 var version = "dev"
 
 func main() {
+	if err := serve(); err != nil {
+		slog.Error("env-probe stopped", "err", err)
+		os.Exit(1)
+	}
+}
+
+func serve() error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
@@ -29,15 +36,12 @@ func main() {
 	if port == "" {
 		port = "8080"
 	}
-	ln, err := net.Listen("tcp", ":"+port)
+	var lc net.ListenConfig
+	ln, err := lc.Listen(ctx, "tcp", ":"+port)
 	if err != nil {
-		slog.Error("listen", "err", err)
-		os.Exit(1)
+		return fmt.Errorf("listen: %w", err)
 	}
-	if err := run(ctx, ln, os.Getenv); err != nil {
-		slog.Error("env-probe stopped", "err", err)
-		os.Exit(1)
-	}
+	return run(ctx, ln, os.Getenv)
 }
 
 // run serves until ctx is cancelled, then shuts down gracefully.

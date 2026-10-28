@@ -9,6 +9,12 @@ import (
 	"time"
 )
 
+func listen(t *testing.T) (net.Listener, error) {
+	t.Helper()
+	var lc net.ListenConfig
+	return lc.Listen(t.Context(), "tcp", "127.0.0.1:0")
+}
+
 func env(m map[string]string) func(string) string {
 	return func(k string) string { return m[k] }
 }
@@ -24,7 +30,7 @@ func TestRunServesAndShutsDown(t *testing.T) {
 		{"with database", map[string]string{"DATABASE_URL": "postgres://app:x@127.0.0.1:1/app?sslmode=disable"}, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			ln, err := net.Listen("tcp", "127.0.0.1:0")
+			ln, err := listen(t)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -69,7 +75,7 @@ func TestRunServesAndShutsDown(t *testing.T) {
 }
 
 func TestRunRejectsBadDatabaseURL(t *testing.T) {
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	ln, err := listen(t)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +86,7 @@ func TestRunRejectsBadDatabaseURL(t *testing.T) {
 }
 
 func TestRunReportsServeError(t *testing.T) {
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	ln, err := listen(t)
 	if err != nil {
 		t.Fatal(err)
 	}

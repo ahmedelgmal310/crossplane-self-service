@@ -72,7 +72,7 @@ expect_rejected() { # <file> <expected message> <kubectl identity...>
   fi
   grep -qF -- "$want" <<<"$out" || fail "$file rejected for the wrong reason: $out"
   pass "$(basename "$file"): ${out#*: }"
-  printf '| `%s` | %s |\n' "$(basename "$file")" "$(tr '\n|' ' /' <<<"$out" | sed 's/  */ /g')" >>"$RESULTS_DIR/rejections.md"
+  printf '| %s | %s |\n' "$(basename "$file")" "$(tr '\n|' ' /' <<<"$out" | sed 's/  */ /g')" >>"$RESULTS_DIR/rejections.md"
 }
 : >"$RESULTS_DIR/rejections.md"
 expect_rejected examples/invalid/missing-team-label.yaml "must carry the label platform.example.io/team" "${DEV_PAYMENTS[@]}"
