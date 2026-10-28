@@ -137,20 +137,25 @@ jobs:
       - name: Validate rendered resources against provider and XRD schemas
         if: ${{ !cancelled() }}
         run: |
-          crossplane resource validate \
+          # Schema downloads from xpkg.crossplane.io are sometimes rate limited
+          # (HTTP 429), so retry the call; a real validation failure fails all
+          # three attempts.
+          retry() { for i in 1 2 3; do "$@" && return 0; echo "attempt $i failed"; sleep 15; done; return 1; }
+          retry crossplane resource validate \
             test/schemas/extensions.yaml,apis/appenvironment/definition.yaml rendered/ \
             --crossplane-image "$CROSSPLANE_IMAGE" --error-on-missing-schemas --skip-success-results
       - name: Validate claims, Compositions and packages offline
         if: ${{ !cancelled() }}
         run: |
-          crossplane resource validate apis/appenvironment/definition.yaml \
+          retry() { for i in 1 2 3; do "$@" && return 0; echo "attempt $i failed"; sleep 15; done; return 1; }
+          retry crossplane resource validate apis/appenvironment/definition.yaml \
             examples/checkout-api.yaml,examples/preview.yaml \
             --crossplane-image "$CROSSPLANE_IMAGE" --error-on-missing-schemas
           # Function inputs (P&T Resources, cel-filter Filters) are validated
           # against the schemas shipped in the function packages. The CLI has
           # no schema for the Composition wrapper itself, so this call does not
           # use --error-on-missing-schemas.
-          crossplane resource validate test/schemas/extensions.yaml,platform/functions.yaml \
+          retry crossplane resource validate test/schemas/extensions.yaml,platform/functions.yaml \
             apis/appenvironment/composition-kind.yaml,apis/appenvironment/composition-aws.yaml,platform/provider-configs.yaml \
             --crossplane-image "$CROSSPLANE_IMAGE"
           # Schema-level rejections are caught before anything reaches a cluster.
